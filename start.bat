@@ -20,7 +20,7 @@ echo   Path:  %PROJECT_DIR%
 echo.
 
 rem Run the game (not the editor). Keep this console attached so crashes are visible.
-"%GODOT%" --path "%PROJECT_DIR%"
+"%GODOT%" --path "%PROJECT_DIR%" --maximized
 set "ERR=%ERRORLEVEL%"
 
 if not "%ERR%"=="0" (

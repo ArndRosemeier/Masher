@@ -29,7 +29,7 @@ func set_interact_hint(text: String) -> void:
 
 func show_playing() -> void:
 	banner.visible = false
-	hint.text = "Mouse look · LMB attack · E doors · Esc free cursor"
+	hint.text = "Mouse look · LMB attack · Space jump · E doors · Esc free cursor"
 	hint.visible = true
 	set_interact_hint("")
 

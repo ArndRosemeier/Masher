@@ -15,6 +15,8 @@ emission_energy_multiplier = 2.0
 collision_layer = 2
 collision_mask = 1
 floor_stop_on_slope = true
+floor_max_angle = 1.2
+floor_snap_length = 0.3
 script = ExtResource("1_player")
 
 [node name="CollisionShape3D" type="CollisionShape3D" parent="."]
@@ -28,7 +30,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.55, 0)
 current = true
 fov = 75.0
 near = 0.05
-far = 80.0
+far = 140.0
 
 [node name="AttackRay" type="RayCast3D" parent="CameraPivot/Camera3D"]
 target_position = Vector3(0, 0, -2.2)

@@ -1,5 +1,5 @@
 extends Node3D
-## Scene wrapper around FixedLevelSource for editor preview / plan layout.
+## Scene wrapper around FixedLevelSource for editor preview.
 
 
 func _ready() -> void:

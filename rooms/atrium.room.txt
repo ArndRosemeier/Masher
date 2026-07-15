@@ -1,0 +1,46 @@
+# id: atrium
+# cell: 2.0
+# layer_height: 4.0
+# open: E
+
+layer 0
+############
+#XXXXXXXXXX#
+#XXXXXXXXXX#
+#XXXXXXXXXX#
+#XXXXXSXXXX#
+#XXXXXSXXXXX
+#XXXXXSXXXX#
+#XXXXXSXXXX#
+#XXXXXSXXXX#
+#XXXXXXXXXX#
+#XXXXXXXXXX#
+############
+
+layer 1
+############
+#XXXXXXXXXX#
+#X........X#
+#XS.......X#
+#XS.......X#
+#XS.......X#
+#XS.......X#
+#XS.......X#
+#XXXXX.XXXX#
+#XXXXX.XXXX#
+#XXXXXXXXXX#
+############
+
+layer 2
+############
+#XXXXPXXXXX#
+#X........X#
+#X........X#
+#X........X#
+#X........X#
+#X........X#
+#X........X#
+#X........X#
+#XXXXXXXXXX#
+#XXXXXXXXXX#
+############

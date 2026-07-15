@@ -16,6 +16,9 @@ const BARREL := DUNGEON + "/barrel_small.gltf.glb"
 const CRATE := DUNGEON + "/box_small.gltf.glb"
 const BANNER := DUNGEON + "/banner_red.gltf.glb"
 const CHEST := DUNGEON + "/chest.glb"
+const STAIRS := DUNGEON + "/stairs_wide.gltf.glb"
+const STAIRS_WOOD := DUNGEON + "/stairs_wood.gltf.glb"
+const BARRIER := DUNGEON + "/barrier.gltf.glb"
 
 const SKELETON_WARRIOR := "res://assets/kaykit/skeletons/Characters/gltf/Skeleton_Warrior.glb"
 

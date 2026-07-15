@@ -71,7 +71,7 @@ grow_horizontal = 2
 grow_vertical = 0
 mouse_filter = 2
 theme_override_colors/font_color = Color(0.75, 0.7, 0.6, 1)
-text = "Mouse look · LMB attack · E doors · Esc free cursor"
+text = "Mouse look · LMB attack · Space jump · E doors · Esc free cursor"
 horizontal_alignment = 1
 
 [node name="InteractHint" type="Label" parent="Root"]

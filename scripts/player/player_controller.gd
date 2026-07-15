@@ -7,6 +7,7 @@ signal interact_hint_changed(text: String)
 
 @export var move_speed: float = 5.0
 @export var mouse_sensitivity: float = 0.0025
+@export var jump_velocity: float = 4.2
 @export var max_health: int = 100
 @export var attack_damage: int = 25
 @export var attack_range: float = 2.2
@@ -73,6 +74,10 @@ func _input(event: InputEvent) -> void:
 	elif event.is_action_pressed("interact") and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		_try_interact()
 		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("jump") and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		if is_on_floor():
+			velocity.y = jump_velocity
+		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("toggle_mouse"):
 		if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -92,7 +97,7 @@ func _physics_process(delta: float) -> void:
 	var gravity: float = float(ProjectSettings.get_setting("physics/3d/default_gravity"))
 	if not is_on_floor():
 		velocity.y -= gravity * delta
-	else:
+	elif velocity.y < 0.0:
 		velocity.y = 0.0
 
 	var input_dir := Vector2.ZERO

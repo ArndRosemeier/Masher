@@ -40,3 +40,35 @@ On `Main` → `RunManager`, set `level_mode`:
 
 See `scripts/dungeon/module_contract.gd` and `scripts/procgen/README.md`.
 Gameplay finds `player_spawn`, `enemy_spawn`, and `exit` groups — never hardcodes world positions.
+
+## ASCII room specs
+
+Rooms are authored as layered ASCII in `rooms/*.room.txt` (one map per floor).
+Pipeline: parse → validate → bake (`scripts/dungeon/spec/`).
+
+```text
+# id: example
+# cell: 2.0
+# layer_height: 4.0
+# open: E
+
+layer 0
+####
+#PX.
+#XS.
+####
+
+layer 1
+####
+#XX#
+#X.#
+####
+```
+
+Legend: `#` wall · `.` void · `X`/`+` floor · `S` stair · `P` spawn · `E` exit · `M` enemy
+
+Validate all rooms headless:
+
+```powershell
+godot --path . --headless -s res://scripts/dev/validate_rooms.gd
+```

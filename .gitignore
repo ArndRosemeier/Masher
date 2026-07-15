@@ -1,0 +1,15 @@
+# Godot 4
+.godot/
+*.translation
+export.cfg
+export_presets.cfg
+.mono/
+data_*/
+*.apk
+*.aab
+
+# Local tooling / downloads
+_tmp/
+tools/*.exe
+*.pyc
+__pycache__/

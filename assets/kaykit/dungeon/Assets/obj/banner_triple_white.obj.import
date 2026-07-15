@@ -1,0 +1,25 @@
+[remap]
+
+importer="wavefront_obj"
+importer_version=1
+type="Mesh"
+uid="uid://cb8yndgej4rxb"
+path="res://.godot/imported/banner_triple_white.obj-af5107c5ccb062c9d3661593fcc44694.mesh"
+
+[deps]
+
+files=["res://.godot/imported/banner_triple_white.obj-af5107c5ccb062c9d3661593fcc44694.mesh"]
+
+source_file="res://assets/kaykit/dungeon/Assets/obj/banner_triple_white.obj"
+dest_files=["res://.godot/imported/banner_triple_white.obj-af5107c5ccb062c9d3661593fcc44694.mesh", "res://.godot/imported/banner_triple_white.obj-af5107c5ccb062c9d3661593fcc44694.mesh"]
+
+[params]
+
+generate_tangents=true
+generate_lods=true
+generate_shadow_mesh=true
+generate_lightmap_uv2=false
+generate_lightmap_uv2_texel_size=0.2
+scale_mesh=Vector3(1, 1, 1)
+offset_mesh=Vector3(0, 0, 0)
+force_disable_mesh_compression=false

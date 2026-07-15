@@ -1,0 +1,76 @@
+[gd_scene load_steps=10 format=3]
+
+[ext_resource type="Script" path="res://scripts/dungeon/door.gd" id="1_door"]
+[ext_resource type="AudioStream" path="res://assets/audio/game/door_open.ogg" id="2_open"]
+[ext_resource type="AudioStream" path="res://assets/audio/game/door_close.ogg" id="3_close"]
+
+[sub_resource type="StandardMaterial3D" id="Mat_wood"]
+albedo_color = Color(0.36, 0.22, 0.12, 1)
+roughness = 0.85
+
+[sub_resource type="BoxMesh" id="BoxMesh_panel"]
+material = SubResource("Mat_wood")
+size = Vector3(1.6, 2.5, 0.12)
+
+[sub_resource type="BoxShape3D" id="BoxShape_panel"]
+size = Vector3(1.6, 2.5, 0.16)
+
+[sub_resource type="SphereShape3D" id="SphereShape_interact"]
+radius = 2.4
+
+[sub_resource type="StandardMaterial3D" id="Mat_band"]
+albedo_color = Color(0.45, 0.42, 0.38, 1)
+metallic = 0.55
+roughness = 0.4
+
+[sub_resource type="BoxMesh" id="BoxMesh_band"]
+material = SubResource("Mat_band")
+size = Vector3(1.55, 0.1, 0.14)
+
+[node name="Door" type="Node3D"]
+script = ExtResource("1_door")
+
+[node name="Hinge" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.8, 0, 0)
+
+[node name="Body" type="StaticBody3D" parent="Hinge"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.8, 1.25, 0)
+collision_layer = 1
+collision_mask = 0
+
+[node name="Mesh" type="MeshInstance3D" parent="Hinge/Body"]
+mesh = SubResource("BoxMesh_panel")
+
+[node name="BandTop" type="MeshInstance3D" parent="Hinge/Body"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.85, 0)
+mesh = SubResource("BoxMesh_band")
+
+[node name="BandMid" type="MeshInstance3D" parent="Hinge/Body"]
+mesh = SubResource("BoxMesh_band")
+
+[node name="BandBot" type="MeshInstance3D" parent="Hinge/Body"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.85, 0)
+mesh = SubResource("BoxMesh_band")
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="Hinge/Body"]
+shape = SubResource("BoxShape_panel")
+
+[node name="InteractArea" type="Area3D" parent="."]
+collision_layer = 0
+collision_mask = 2
+monitoring = true
+monitorable = false
+
+[node name="CollisionShape3D" type="CollisionShape3D" parent="InteractArea"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.2, 0)
+shape = SubResource("SphereShape_interact")
+
+[node name="SfxOpen" type="AudioStreamPlayer3D" parent="."]
+stream = ExtResource("2_open")
+volume_db = -4.0
+max_distance = 18.0
+
+[node name="SfxClose" type="AudioStreamPlayer3D" parent="."]
+stream = ExtResource("3_close")
+volume_db = -4.0
+max_distance = 18.0

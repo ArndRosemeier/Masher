@@ -1,0 +1,25 @@
+[remap]
+
+importer="wavefront_obj"
+importer_version=1
+type="Mesh"
+uid="uid://4cmuh7vpnjnx"
+path="res://.godot/imported/wall_half.obj-060ba140a78c665feefc6a0f6095582f.mesh"
+
+[deps]
+
+files=["res://.godot/imported/wall_half.obj-060ba140a78c665feefc6a0f6095582f.mesh"]
+
+source_file="res://assets/kaykit/dungeon/Assets/obj/wall_half.obj"
+dest_files=["res://.godot/imported/wall_half.obj-060ba140a78c665feefc6a0f6095582f.mesh", "res://.godot/imported/wall_half.obj-060ba140a78c665feefc6a0f6095582f.mesh"]
+
+[params]
+
+generate_tangents=true
+generate_lods=true
+generate_shadow_mesh=true
+generate_lightmap_uv2=false
+generate_lightmap_uv2_texel_size=0.2
+scale_mesh=Vector3(1, 1, 1)
+offset_mesh=Vector3(0, 0, 0)
+force_disable_mesh_compression=false

@@ -11,15 +11,18 @@ static func bake(spec: RoomSpec) -> RoomModule:
 	room.module_id = spec.id
 	room.open_dirs = spec.open_dirs.duplicate()
 
-	## Upper stair-column cells must stay open (no floor). Lower `S` cells still need
-	## a floor slab — otherwise you fall through the void under the treads.
-	var stair_upper: Dictionary = {} ## Vector3i(level,x,z) -> true
+	## Upper stair-column cells must stay open (no floor). Down-stair shafts are open
+	## on their own layer. Lower ascending `S` cells still need a floor slab.
+	var stair_skip_floor: Dictionary = {} ## Vector3i(level,x,z) -> true
 	var runs := StairDetector.detect(spec)
 	for run in runs:
 		for c in run.cells:
-			stair_upper[Vector3i(run.level + 1, c.x, c.y)] = true
+			if run.ascending:
+				stair_skip_floor[Vector3i(run.level + 1, c.x, c.y)] = true
+			else:
+				stair_skip_floor[Vector3i(run.level, c.x, c.y)] = true
 
-	_add_floors(room, spec, stair_upper)
+	_add_floors(room, spec, stair_skip_floor)
 	_add_walls(room, spec)
 	_add_doorframes(room, spec)
 	_bake_stairs(room, spec, runs)
@@ -42,13 +45,13 @@ static func _cell_needs_floor(kind: int) -> bool:
 	return RoomCells.is_floor_surface(kind) or kind == RoomCells.Kind.WALL
 
 
-static func _add_floors(room: RoomModule, spec: RoomSpec, stair_upper: Dictionary) -> void:
+static func _add_floors(room: RoomModule, spec: RoomSpec, stair_skip_floor: Dictionary) -> void:
 	# Collision per cell (no visual seams). KayKit tiles are the visible floor.
-	# `stair_upper` = open stairwell on the landing layer (no floor).
+	# `stair_skip_floor` = open shaft / upper stairwell (no floor).
 	for level in spec.layer_count():
 		for z in spec.depth:
 			for x in spec.width:
-				if stair_upper.has(Vector3i(level, x, z)):
+				if stair_skip_floor.has(Vector3i(level, x, z)):
 					continue
 				var kind: int = spec.get_cell(level, x, z)
 				if not _cell_needs_floor(kind):
@@ -63,14 +66,14 @@ static func _add_floors(room: RoomModule, spec: RoomSpec, stair_upper: Dictionar
 					Vector3(spec.cell_size, thickness, spec.cell_size)
 				)
 
-		_add_kaykit_floor_tiles(room, spec, level, stair_upper)
+		_add_kaykit_floor_tiles(room, spec, level, stair_skip_floor)
 
 
 static func _add_kaykit_floor_tiles(
 	room: RoomModule,
 	spec: RoomSpec,
 	level: int,
-	stair_upper: Dictionary
+	stair_skip_floor: Dictionary
 ) -> void:
 	var cells_per_tile := int(round(KAYKIT_FLOOR_SIZE / spec.cell_size))
 	if cells_per_tile < 1:
@@ -81,7 +84,7 @@ static func _add_kaykit_floor_tiles(
 	while tz < spec.depth:
 		var tx := 0
 		while tx < spec.width:
-			if _floor_tile_block_needed(spec, level, tx, tz, cells_per_tile, stair_upper):
+			if _floor_tile_block_needed(spec, level, tx, tz, cells_per_tile, stair_skip_floor):
 				var tile_i := int(tx / cells_per_tile)
 				var tile_j := int(tz / cells_per_tile)
 				var path := KaykitPaths.FLOOR if (tile_i + tile_j) % 2 == 0 else KaykitPaths.FLOOR_ROCKS
@@ -104,15 +107,20 @@ static func _floor_tile_block_needed(
 	tx: int,
 	tz: int,
 	cells_per_tile: int,
-	stair_upper: Dictionary
+	stair_skip_floor: Dictionary
 ) -> bool:
-	for z in range(tz, mini(tz + cells_per_tile, spec.depth)):
-		for x in range(tx, mini(tx + cells_per_tile, spec.width)):
-			if stair_upper.has(Vector3i(level, x, z)):
-				continue
-			if _cell_needs_floor(spec.get_cell(level, x, z)):
-				return true
-	return false
+	## Only place a KayKit tile when the full footprint is solid floor — never span a shaft.
+	var x1 := mini(tx + cells_per_tile, spec.width)
+	var z1 := mini(tz + cells_per_tile, spec.depth)
+	if x1 - tx < cells_per_tile or z1 - tz < cells_per_tile:
+		return false
+	for z in range(tz, z1):
+		for x in range(tx, x1):
+			if stair_skip_floor.has(Vector3i(level, x, z)):
+				return false
+			if not _cell_needs_floor(spec.get_cell(level, x, z)):
+				return false
+	return true
 
 
 static func _add_walls(room: RoomModule, spec: RoomSpec) -> void:
@@ -389,15 +397,14 @@ static func _wall_piece(
 
 
 static func _bake_stairs(room: RoomModule, spec: RoomSpec, runs: Array[StairRun]) -> void:
-	## ASCII `S` cells define the stair footprint/run. Physical steps are subdivided
-	## so rise per step stays climbable without a jump.
+	## ASCII `S` rises one layer; `D` descends one layer_height (level connector).
 	var mat := StandardMaterial3D.new()
 	mat.albedo_color = Color(0.42, 0.28, 0.16)
 	mat.roughness = 0.9
 
 	for run in runs:
 		var root := Node3D.new()
-		root.name = "Stairs_L%d" % run.level
+		root.name = "Stairs_%s_L%d" % ["Up" if run.ascending else "Down", run.level]
 		room.add_child(root)
 
 		var rise := spec.layer_height
@@ -409,7 +416,11 @@ static func _bake_stairs(room: RoomModule, spec: RoomSpec, runs: Array[StairRun]
 		var step_h := rise / float(steps)
 		var step_d := run_len / float(steps)
 		var width := spec.cell_size
+		## Ascending: stand on layer floor and climb up. Descending: shaft opens at
+		## layer floor; steps drop to the level below (sibling module / undercroft).
 		var base_y := float(run.level) * spec.layer_height
+		if not run.ascending:
+			base_y -= spec.layer_height
 
 		var bottom := run.bottom()
 		var axis := ModuleContract.dir_vector(run.dir)
@@ -425,7 +436,6 @@ static func _bake_stairs(room: RoomModule, spec: RoomSpec, runs: Array[StairRun]
 			var center := origin + axis * along
 			var tread_top := base_y + step_h * float(i + 1)
 			center.y = tread_top - step_h * 0.5
-			# Slight overlap along the run so treads never leave a hairline gap.
 			var depth := step_d + 0.02
 			var size := Vector3(width, step_h, depth) if absf(axis.z) > 0.5 else Vector3(depth, step_h, width)
 
@@ -438,8 +448,6 @@ static func _bake_stairs(room: RoomModule, spec: RoomSpec, runs: Array[StairRun]
 			mesh.position = center
 			root.add_child(mesh)
 
-			# Solid riser fill from the layer floor up to this tread — closes the
-			# under-stair cavity that CharacterBody3D otherwise falls through.
 			if i > 0:
 				var fill_h := tread_top - step_h - base_y
 				if fill_h > 0.05:
@@ -452,10 +460,36 @@ static func _bake_stairs(room: RoomModule, spec: RoomSpec, runs: Array[StairRun]
 
 
 static func _add_ceiling(room: RoomModule, spec: RoomSpec) -> void:
-	var top := float(spec.layer_count()) * spec.layer_height + 0.2
-	var wx := float(spec.width) * spec.cell_size
-	var wz := float(spec.depth) * spec.cell_size
-	_box(room, "Ceiling", Vector3(wx * 0.5, top, wz * 0.5), Vector3(wx, 0.25, wz))
+	## Per-cell ceiling so `^` / `D` shafts stay open for vertical connectors.
+	var wall_mat := StandardMaterial3D.new()
+	wall_mat.albedo_color = Color(0.16, 0.14, 0.12)
+	wall_mat.roughness = 0.95
+	var top_level := spec.layer_count() - 1
+	var y := float(spec.layer_count()) * spec.layer_height + 0.1
+	var cs := spec.cell_size
+	var thickness := 0.25
+	for z in spec.depth:
+		for x in spec.width:
+			var kind: int = spec.get_cell(top_level, x, z)
+			if not RoomCells.blocks_ceiling(kind):
+				continue
+			# Also leave ceiling open above any down-stair shaft on lower layers of this room.
+			var shaft_below := false
+			for level in spec.layer_count():
+				var k2: int = spec.get_cell(level, x, z)
+				if k2 == RoomCells.Kind.DOWN_STAIR or k2 == RoomCells.Kind.SHAFT:
+					shaft_below = true
+					break
+			if shaft_below:
+				continue
+			var center := Vector3((float(x) + 0.5) * cs, y, (float(z) + 0.5) * cs)
+			_wall_piece(
+				room,
+				"Ceiling_%d_%d" % [x, z],
+				center,
+				Vector3(cs, thickness, cs),
+				wall_mat
+			)
 
 
 static func _add_markers(room: RoomModule, spec: RoomSpec) -> void:
@@ -479,30 +513,62 @@ static func _add_connectors(room: RoomModule, spec: RoomSpec) -> void:
 	for dir in spec.open_dirs:
 		var marker := Marker3D.new()
 		marker.name = "Connector_%s" % ModuleContract.dir_name(dir)
-		var door_cell := _find_doorway_cell(spec, dir)
-		if door_cell != Vector2i(-1, -1):
-			var c := spec.cell_center(0, door_cell.x, door_cell.y)
-			match dir:
-				ModuleContract.Dir.N:
-					marker.position = Vector3(c.x, 0.0, 0.0)
-				ModuleContract.Dir.S:
-					marker.position = Vector3(c.x, 0.0, wz)
-				ModuleContract.Dir.W:
-					marker.position = Vector3(0.0, 0.0, c.z)
-				ModuleContract.Dir.E:
-					marker.position = Vector3(wx, 0.0, c.z)
+		if ModuleContract.is_vertical(dir):
+			var shaft := _find_vertical_shaft_cell(spec, dir)
+			if shaft != Vector2i(-1, -1):
+				var c := spec.cell_center(0, shaft.x, shaft.y)
+				marker.position = Vector3(
+					c.x,
+					spec.layer_height if dir == ModuleContract.Dir.U else 0.0,
+					c.z
+				)
+			else:
+				marker.position = Vector3(wx * 0.5, 0.0, wz * 0.5)
 		else:
-			match dir:
-				ModuleContract.Dir.N:
-					marker.position = Vector3(wx * 0.5, 0.0, 0.0)
-				ModuleContract.Dir.S:
-					marker.position = Vector3(wx * 0.5, 0.0, wz)
-				ModuleContract.Dir.W:
-					marker.position = Vector3(0.0, 0.0, wz * 0.5)
-				ModuleContract.Dir.E:
-					marker.position = Vector3(wx, 0.0, wz * 0.5)
+			var door_cell := _find_doorway_cell(spec, dir)
+			if door_cell != Vector2i(-1, -1):
+				var c := spec.cell_center(0, door_cell.x, door_cell.y)
+				match dir:
+					ModuleContract.Dir.N:
+						marker.position = Vector3(c.x, 0.0, 0.0)
+					ModuleContract.Dir.S:
+						marker.position = Vector3(c.x, 0.0, wz)
+					ModuleContract.Dir.W:
+						marker.position = Vector3(0.0, 0.0, c.z)
+					ModuleContract.Dir.E:
+						marker.position = Vector3(wx, 0.0, c.z)
+			else:
+				match dir:
+					ModuleContract.Dir.N:
+						marker.position = Vector3(wx * 0.5, 0.0, 0.0)
+					ModuleContract.Dir.S:
+						marker.position = Vector3(wx * 0.5, 0.0, wz)
+					ModuleContract.Dir.W:
+						marker.position = Vector3(0.0, 0.0, wz * 0.5)
+					ModuleContract.Dir.E:
+						marker.position = Vector3(wx, 0.0, wz * 0.5)
 		room.add_child(marker)
 		room.register_connector(dir, marker)
+
+
+static func _find_vertical_shaft_cell(spec: RoomSpec, dir: ModuleContract.Dir) -> Vector2i:
+	var mid := Vector2(float(spec.width) * 0.5, float(spec.depth) * 0.5)
+	var best := Vector2i(-1, -1)
+	var best_d := INF
+	for z in spec.depth:
+		for x in spec.width:
+			var kind: int = spec.get_cell(0, x, z)
+			var ok := (
+				(dir == ModuleContract.Dir.D and RoomCells.is_down_stair(kind))
+				or (dir == ModuleContract.Dir.U and kind == RoomCells.Kind.SHAFT)
+			)
+			if not ok:
+				continue
+			var d := Vector2(float(x) + 0.5, float(z) + 0.5).distance_squared_to(mid)
+			if d < best_d:
+				best_d = d
+				best = Vector2i(x, z)
+	return best
 
 
 static func _add_doors(room: RoomModule, spec: RoomSpec) -> void:
@@ -614,6 +680,8 @@ static func probe_walkable(room: RoomModule, spec: RoomSpec) -> PackedStringArra
 	var runs := StairDetector.detect(spec)
 	var stair_upper: Dictionary = {}
 	for run in runs:
+		if not run.ascending:
+			continue
 		for c in run.cells:
 			stair_upper[Vector3i(run.level + 1, c.x, c.y)] = true
 
@@ -622,9 +690,13 @@ static func probe_walkable(room: RoomModule, spec: RoomSpec) -> PackedStringArra
 			for x in spec.width:
 				var kind: int = spec.get_cell(level, x, z)
 				# Stair treads are thin strips; probe flat floors only. Stair runs are checked structurally.
-				if kind == RoomCells.Kind.STAIR or stair_upper.has(Vector3i(level, x, z)):
+				if (
+					kind == RoomCells.Kind.STAIR
+					or kind == RoomCells.Kind.DOWN_STAIR
+					or stair_upper.has(Vector3i(level, x, z))
+				):
 					continue
-				if not RoomCells.is_floor_surface(kind):
+				if not RoomCells.is_floor_surface(kind) and kind != RoomCells.Kind.WALL:
 					continue
 				# Start above this level's ceiling band so we never begin inside a stair step.
 				var local_origin := Vector3(

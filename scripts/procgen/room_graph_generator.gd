@@ -92,6 +92,8 @@ func build_dungeon() -> Node3D:
 		openings[start_cell],
 		{"player_spawn": true, "decor": true}
 	)
+	start_room.grid_cell = start_cell
+	start_room.vertical_level = 0
 	start_room.position = ModuleContract.grid_to_world(start_cell)
 	root.add_child(start_room)
 
@@ -104,6 +106,8 @@ func build_dungeon() -> Node3D:
 		if is_combat:
 			opts["enemy_spawns"] = 2
 		var room := RoomFactory.build(id, openings[cell], opts)
+		room.grid_cell = cell
+		room.vertical_level = 0
 		room.position = ModuleContract.grid_to_world(cell)
 		root.add_child(room)
 
@@ -114,6 +118,8 @@ func build_dungeon() -> Node3D:
 		openings[exit_cell],
 		{"exit": true, "decor": true}
 	)
+	exit_room.grid_cell = exit_cell
+	exit_room.vertical_level = 0
 	exit_room.position = ModuleContract.grid_to_world(exit_cell)
 	root.add_child(exit_room)
 
@@ -124,6 +130,8 @@ func build_dungeon() -> Node3D:
 			openings[cell],
 			{"enemy_spawns": 1, "decor": true}
 		)
+		room.grid_cell = cell
+		room.vertical_level = 0
 		room.position = ModuleContract.grid_to_world(cell)
 		root.add_child(room)
 

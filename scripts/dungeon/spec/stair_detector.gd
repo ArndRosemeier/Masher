@@ -1,9 +1,16 @@
 class_name StairDetector
 extends RefCounted
-## Finds contiguous S runs and infers climb direction.
+## Finds contiguous S (up) and D (down) runs and infers climb direction.
 
 
 static func detect(spec: RoomSpec) -> Array[StairRun]:
+	var runs: Array[StairRun] = []
+	runs.append_array(_detect_kind(spec, RoomCells.Kind.STAIR, true))
+	runs.append_array(_detect_kind(spec, RoomCells.Kind.DOWN_STAIR, false))
+	return runs
+
+
+static func _detect_kind(spec: RoomSpec, kind: int, ascending: bool) -> Array[StairRun]:
 	var runs: Array[StairRun] = []
 	var visited: Dictionary = {}
 	for level in spec.layer_count():
@@ -12,15 +19,22 @@ static func detect(spec: RoomSpec) -> Array[StairRun]:
 				var key := Vector3i(level, x, z)
 				if visited.has(key):
 					continue
-				if spec.get_cell(level, x, z) != RoomCells.Kind.STAIR:
+				if spec.get_cell(level, x, z) != kind:
 					continue
-				var component := _flood(spec, level, x, z, visited)
-				var run := _component_to_run(spec, level, component)
+				var component := _flood(spec, level, x, z, kind, visited)
+				var run := _component_to_run(spec, level, component, ascending)
 				runs.append(run)
 	return runs
 
 
-static func _flood(spec: RoomSpec, level: int, sx: int, sz: int, visited: Dictionary) -> Array[Vector2i]:
+static func _flood(
+	spec: RoomSpec,
+	level: int,
+	sx: int,
+	sz: int,
+	kind: int,
+	visited: Dictionary
+) -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
 	var stack: Array[Vector2i] = [Vector2i(sx, sz)]
 	while not stack.is_empty():
@@ -28,7 +42,7 @@ static func _flood(spec: RoomSpec, level: int, sx: int, sz: int, visited: Dictio
 		var key := Vector3i(level, c.x, c.y)
 		if visited.has(key):
 			continue
-		if spec.get_cell(level, c.x, c.y) != RoomCells.Kind.STAIR:
+		if spec.get_cell(level, c.x, c.y) != kind:
 			continue
 		visited[key] = true
 		out.append(c)
@@ -39,7 +53,12 @@ static func _flood(spec: RoomSpec, level: int, sx: int, sz: int, visited: Dictio
 	return out
 
 
-static func _component_to_run(spec: RoomSpec, level: int, component: Array[Vector2i]) -> StairRun:
+static func _component_to_run(
+	spec: RoomSpec,
+	level: int,
+	component: Array[Vector2i],
+	ascending: bool
+) -> StairRun:
 	assert(component.size() >= 2, "Stair run too short at layer %d" % level)
 	var min_x := component[0].x
 	var max_x := component[0].x
@@ -57,9 +76,11 @@ static func _component_to_run(spec: RoomSpec, level: int, component: Array[Vecto
 
 	var run := StairRun.new()
 	run.level = level
+	run.ascending = ascending
 	var along_x := span_x >= span_z
 
-	# Order candidates: ends of the line. Bottom = end with more walkable non-stair neighbors on this layer.
+	# Ends of the line. Bottom = low end of the climb (more floor touch for up-stairs;
+	# for down-stairs the high end is the approach from this layer's floor).
 	var end_a: Vector2i
 	var end_b: Vector2i
 	if along_x:
@@ -71,8 +92,15 @@ static func _component_to_run(spec: RoomSpec, level: int, component: Array[Vecto
 
 	var score_a := _floor_touch_score(spec, level, end_a)
 	var score_b := _floor_touch_score(spec, level, end_b)
-	var bottom := end_a if score_a >= score_b else end_b
-	var top := end_b if bottom == end_a else end_a
+	# Ascending: bottom has more same-layer floor. Descending: top (approach) has more floor.
+	var bottom: Vector2i
+	var top: Vector2i
+	if ascending:
+		bottom = end_a if score_a >= score_b else end_b
+		top = end_b if bottom == end_a else end_a
+	else:
+		top = end_a if score_a >= score_b else end_b
+		bottom = end_b if top == end_a else end_a
 
 	if along_x:
 		run.dir = ModuleContract.Dir.E if top.x > bottom.x else ModuleContract.Dir.W

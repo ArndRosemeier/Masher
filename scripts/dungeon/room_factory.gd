@@ -37,6 +37,8 @@ static func build(
 
 	RoomValidators.validate_or_assert(spec, require_player, require_exit)
 	var room := RoomBaker.bake(spec)
+	room.spec = spec
+	room.add_to_group(ModuleContract.GROUP_MODULE)
 
 	var dress := bool(opts.get("decor", true))
 	if dress:
@@ -134,6 +136,14 @@ static func _add_sparse_decor(room: RoomModule, spec: RoomSpec, module_id: Strin
 			_place_prop(room, KaykitPaths.BANNER, _prop_pos(spec, 0.5, 1.0, 0.35), PI, false)
 			_place_prop(room, KaykitPaths.COLUMN, _prop_pos(spec, 0.2, 0.8), 0.0, true)
 			_place_prop(room, KaykitPaths.COLUMN, _prop_pos(spec, 0.8, 0.8), 0.0, true)
+		&"undercroft":
+			_place_prop(room, KaykitPaths.COLUMN, _prop_pos(spec, 0.15, 0.2), 0.0, true)
+			_place_prop(room, KaykitPaths.COLUMN, _prop_pos(spec, 0.85, 0.2), 0.0, true)
+			_place_prop(room, KaykitPaths.COLUMN, _prop_pos(spec, 0.15, 0.8), 0.0, true)
+			_place_prop(room, KaykitPaths.COLUMN, _prop_pos(spec, 0.85, 0.8), 0.0, true)
+			_place_prop(room, KaykitPaths.BARREL, _prop_pos(spec, 0.35, 0.55), 0.4, true)
+			_place_prop(room, KaykitPaths.CRATE, _prop_pos(spec, 0.65, 0.4), -0.2, true)
+			_place_prop(room, KaykitPaths.BANNER, _prop_pos(spec, 0.5, 0.0, 0.35), 0.0, false)
 		_:
 			_place_prop(room, KaykitPaths.BARREL, _prop_pos(spec, 0.5, 0.5), 0.0, true)
 

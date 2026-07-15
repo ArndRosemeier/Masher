@@ -1,0 +1,16 @@
+# id: undercroft
+# cell: 2.0
+# layer_height: 4.0
+# open: U
+
+layer 0
+####################
+#XXXXXXXXXXXXXXXXXX#
+#XXXXXXXXXXXXXXXXXX#
+#XXXXXXXXXXXXXXXXXX#
+#XXXXXXXXXXXXXXXXXX#
+#X^XXXXXXXXXXXXXXXX#
+#X^XXXXXXXXXXXXXXXX#
+#X^XXXXXXXXXXXXXXXX#
+#X^XXXXXXXXXXXXXXXX#
+####################

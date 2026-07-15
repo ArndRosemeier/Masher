@@ -86,6 +86,10 @@ static func _parse_meta(spec: RoomSpec, line: String) -> void:
 					spec.open_dirs.append(ModuleContract.Dir.S)
 				"W":
 					spec.open_dirs.append(ModuleContract.Dir.W)
+				"U":
+					spec.open_dirs.append(ModuleContract.Dir.U)
+				"D":
+					spec.open_dirs.append(ModuleContract.Dir.D)
 				"":
 					pass
 				_:
@@ -105,12 +109,13 @@ static func _commit_layer(spec: RoomSpec, _level: int, rows: Array[String], sour
 		)
 		var cells: Array = []
 		for c in width:
-			var ch := row[c]
+			var ch := String(row[c])
+			var kind: int = RoomCells.from_char(ch)
 			assert(
-				ch in ["#", ".", "X", "+", "S", "P", "E", "M"],
+				kind != RoomCells.Kind.EMPTY or ch == ".",
 				"%s: unknown char '%s' at %d,%d" % [source_name, ch, c, r]
 			)
-			cells.append(RoomCells.from_char(ch))
+			cells.append(kind)
 		grid.append(cells)
 	if spec.width == 0:
 		spec.width = width

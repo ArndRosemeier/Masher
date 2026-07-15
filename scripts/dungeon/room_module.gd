@@ -5,6 +5,11 @@ extends Node3D
 @export var module_id: StringName = &"room"
 @export var open_dirs: Array[ModuleContract.Dir] = []
 
+## Set by factory / level source for ASCII map + future procgen.
+var spec: RoomSpec
+var grid_cell: Vector2i = Vector2i.ZERO
+var vertical_level: int = 0
+
 var _connectors: Dictionary = {} ## Dir -> Marker3D
 
 

@@ -1,7 +1,7 @@
 # id: atrium
 # cell: 2.0
 # layer_height: 4.0
-# open: E
+# open: E,D
 
 layer 0
 ############
@@ -9,10 +9,10 @@ layer 0
 #XXXXXXXXXX#
 #XXXXXXXXXX#
 #XXXXXSXXXX#
-#XXXXXSXXXXX
-#XXXXXSXXXX#
-#XXXXXSXXXX#
-#XXXXXSXXXX#
+#XDXXXSXXXXX
+#XDXXXSXXXX#
+#XDXXXSXXXX#
+#XDXXXSXXXX#
 #XXXXXXXXXX#
 #XXXXXXXXXX#
 ############

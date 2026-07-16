@@ -70,8 +70,11 @@ static func build(
 	if dress:
 		_add_torches(room, spec)
 		_add_sparse_decor(room, spec, module_id)
-	if bool(opts.get("exit", false)) or want_exit:
-		_place_exit_chest(room, spec)
+	if bool(opts.get("loot_chest", false)) or module_id == &"combat" or module_id == &"hall":
+		_place_loot_chest(room, spec)
+	elif bool(opts.get("exit", false)) or want_exit:
+		## Legacy exit rooms still get a loot chest (no win orb).
+		_place_loot_chest(room, spec)
 	return room
 
 
@@ -111,16 +114,48 @@ static func _ensure_enemy_markers(spec: RoomSpec, count: int) -> void:
 					existing += 1
 	if existing >= count:
 		return
-	# Place on ground floor walkable cells away from edges
+	## Prefer interior floor cells away from open doorway edges.
 	var need := count - existing
 	for z in range(1, spec.depth - 1):
 		for x in range(1, spec.width - 1):
 			if need <= 0:
 				return
-			if RoomCells.is_floor_surface(spec.get_cell(0, x, z)) and spec.get_cell(0, x, z) != RoomCells.Kind.ENEMY:
+			if spec.get_cell(0, x, z) != RoomCells.Kind.FLOOR:
+				continue
+			if _near_open_doorway(spec, 0, x, z):
+				continue
+			spec.set_cell(0, x, z, RoomCells.Kind.ENEMY)
+			need -= 1
+	## Fallback if the room is too small to satisfy doorway clearance.
+	if need > 0:
+		for z in range(1, spec.depth - 1):
+			for x in range(1, spec.width - 1):
+				if need <= 0:
+					return
 				if spec.get_cell(0, x, z) == RoomCells.Kind.FLOOR:
 					spec.set_cell(0, x, z, RoomCells.Kind.ENEMY)
 					need -= 1
+
+
+static func _near_open_doorway(spec: RoomSpec, level: int, x: int, z: int) -> bool:
+	## Keep at least one full cell between spawn and an open face doorway.
+	const CLEARANCE := 1
+	for dir in spec.open_dirs:
+		if ModuleContract.is_vertical(dir):
+			continue
+		var on_edge := false
+		match dir:
+			ModuleContract.Dir.N:
+				on_edge = z <= CLEARANCE
+			ModuleContract.Dir.S:
+				on_edge = z >= spec.depth - 1 - CLEARANCE
+			ModuleContract.Dir.W:
+				on_edge = x <= CLEARANCE
+			ModuleContract.Dir.E:
+				on_edge = x >= spec.width - 1 - CLEARANCE
+		if on_edge:
+			return true
+	return false
 
 
 static func _room_size(spec: RoomSpec) -> Vector2:
@@ -205,7 +240,7 @@ static func _add_sparse_decor(room: RoomModule, spec: RoomSpec, module_id: Strin
 			_place_prop(room, KaykitPaths.BARREL, _prop_pos(spec, 0.5, 0.5), 0.0, true)
 
 
-static func _place_exit_chest(room: RoomModule, spec: RoomSpec) -> void:
+static func _place_loot_chest(room: RoomModule, spec: RoomSpec) -> void:
 	var pos := _prop_pos(spec, 0.5, 0.72)
 	for level in spec.layer_count():
 		for z in spec.depth:
@@ -213,7 +248,27 @@ static func _place_exit_chest(room: RoomModule, spec: RoomSpec) -> void:
 				if spec.get_cell(level, x, z) == RoomCells.Kind.EXIT:
 					var c := spec.cell_center(level, x, z)
 					pos = _prop_pos(spec, c.x / _room_size(spec).x, 0.72)
-	_place_prop(room, KaykitPaths.CHEST, pos, 0.0, true)
+	var packed := load(KaykitPaths.LOOT_CHEST_SCENE) as PackedScene
+	assert(packed != null, "Missing loot chest scene")
+	var chest := packed.instantiate() as Node3D
+	chest.name = "LootChest"
+	chest.position = pos
+	var mesh_root := Node3D.new()
+	mesh_root.name = "Mesh"
+	var inst := _instance_mesh(KaykitPaths.CHEST)
+	mesh_root.add_child(inst)
+	chest.add_child(mesh_root)
+	var hull := _prop_hull_for(KaykitPaths.CHEST)
+	var body := StaticBody3D.new()
+	body.name = "Collision"
+	body.collision_layer = 1
+	body.collision_mask = 0
+	var col := CollisionShape3D.new()
+	col.shape = hull["shape"]
+	col.position = hull["offset"]
+	body.add_child(col)
+	chest.add_child(body)
+	room.add_child(chest)
 
 
 static func _place_prop(room: RoomModule, path: String, pos: Vector3, yaw: float, solid: bool) -> void:

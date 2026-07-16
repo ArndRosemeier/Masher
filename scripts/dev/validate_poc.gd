@@ -17,13 +17,13 @@ func _run() -> void:
 
 	var player_spawns := _count_under(fixed, ModuleContract.GROUP_PLAYER_SPAWN)
 	var enemy_spawns := _count_under(fixed, ModuleContract.GROUP_ENEMY_SPAWN)
-	var exits := _count_under(fixed, ModuleContract.GROUP_EXIT)
+	var chests := _count_under(fixed, &"loot_chest")
 	if player_spawns != 1:
 		errors.append("Fixed: expected 1 player spawn, got %d" % player_spawns)
 	if enemy_spawns < 1:
 		errors.append("Fixed: expected enemy spawns, got %d" % enemy_spawns)
-	if exits != 1:
-		errors.append("Fixed: expected 1 exit, got %d" % exits)
+	if chests < 1:
+		errors.append("Fixed: expected loot chests, got %d" % chests)
 
 	fixed.free()
 

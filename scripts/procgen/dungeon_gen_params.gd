@@ -68,6 +68,12 @@ func upper_cluster_target() -> int:
 	return clampi(2 + floor_count(), 2, 6)
 
 
+func lower_cluster_target() -> int:
+	## Rooms to grow on the basement storey from the undercroft.
+	## Slightly smaller than upper clusters — basement is optional flavor, not the spine.
+	return clampi(2 + floor_count() / 2, 2, 5)
+
+
 func max_stair_rises() -> int:
 	## How many times the path may climb (0→1→2…). Capped by harness floors.
 	return clampi(floor_count() - 1, 1, 3)

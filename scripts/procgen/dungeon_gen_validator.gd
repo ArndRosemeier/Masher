@@ -59,11 +59,8 @@ static func _collect_rooms(root: Node3D) -> Array[RoomModule]:
 static func _validate_markers(root: Node3D, rooms: Array[RoomModule]) -> PackedStringArray:
 	var errors: PackedStringArray = []
 	var players := _count_under(root, ModuleContract.GROUP_PLAYER_SPAWN)
-	var exits := _count_under(root, ModuleContract.GROUP_EXIT)
 	if players != 1:
 		errors.append("expected exactly 1 player_spawn, got %d" % players)
-	if exits < 1:
-		errors.append("expected at least 1 exit, got %d" % exits)
 
 	for room in rooms:
 		if room.module_id == &"":
@@ -416,41 +413,25 @@ static func _validate_reachability(
 ) -> PackedStringArray:
 	var errors: PackedStringArray = []
 	var spawn := _first_under(root, ModuleContract.GROUP_PLAYER_SPAWN)
-	var exit_node := _first_under(root, ModuleContract.GROUP_EXIT)
-	if spawn == null or exit_node == null:
+	if spawn == null:
+		errors.append("no player_spawn marker for reachability")
 		return errors
 
 	var start_cell := DungeonMapModel.player_world_cell(spawn, model.cell_size)
 	var start_floor := DungeonMapModel.player_world_floor(spawn, model.level_height)
-	var exit_cell := DungeonMapModel.player_world_cell(exit_node, model.cell_size)
-	var exit_floor := DungeonMapModel.player_world_floor(exit_node, model.level_height)
 
 	if not _floor_has_walkable(model, start_floor, start_cell):
 		## Marker may sit slightly above floor; snap to nearest walkable on that floor.
 		start_cell = _nearest_walkable(model, start_floor, start_cell)
-	if not _floor_has_walkable(model, exit_floor, exit_cell):
-		exit_cell = _nearest_walkable(model, exit_floor, exit_cell)
 
 	if start_cell.x <= -99990:
 		errors.append("player spawn not on any walkable map cell (floor %d)" % start_floor)
 		return errors
-	if exit_cell.x <= -99990:
-		errors.append("exit not on any walkable map cell (floor %d)" % exit_floor)
-		return errors
 
 	var reached := _flood(model, start_floor, start_cell)
-	var exit_key := Vector3i(exit_floor, exit_cell.x, exit_cell.y)
-	if not reached.has(exit_key):
-		errors.append(
-			"exit unreachable from player spawn (spawn F%d %s → exit F%d %s; reached %d cells)"
-			% [start_floor, str(start_cell), exit_floor, str(exit_cell), reached.size()]
-		)
 
 	## Every module must contribute at least one reached walkable cell.
 	for room in rooms:
-		if room.module_id == &"undercroft":
-			## Optional basement — reachable only via paired D/^ ; warn if open D exists unpaired (already checked).
-			continue
 		var touched := false
 		var origin := Vector2i(
 			int(round(room.position.x / model.cell_size)),

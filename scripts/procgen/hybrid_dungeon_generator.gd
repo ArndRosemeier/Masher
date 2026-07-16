@@ -81,10 +81,10 @@ func build_dungeon() -> Node3D:
 
 	_grow_path(rng)
 	_grow_floor_clusters(rng)
+	_grow_basement_cluster(rng)
 	_place_side_rooms(rng)
 	_place_loops(rng)
 	_place_carve_bites(rng)
-	_ensure_exit(rng)
 	_compute_openings()
 	_CarveMerger.apply(_placements)
 
@@ -105,11 +105,8 @@ func build_dungeon() -> Node3D:
 	root.set_meta("height_m", params.height_m)
 
 	var players := _count_in_group(root, ModuleContract.GROUP_PLAYER_SPAWN)
-	var exits := _count_in_group(root, ModuleContract.GROUP_EXIT)
 	if players <= 0:
 		LoudError.report("HybridGen", "Generated dungeon has no player_spawn marker")
-	if exits <= 0:
-		LoudError.report("HybridGen", "Generated dungeon has no exit marker")
 	return root
 
 
@@ -120,7 +117,7 @@ func resolved_seed() -> int:
 func _ensure_catalog() -> void:
 	if not _catalog.is_empty():
 		return
-	for id in [&"atrium", &"undercroft", &"hall", &"stair_test", &"corridor", &"combat", &"exit"]:
+	for id in [&"atrium", &"undercroft", &"hall", &"stair_test", &"corridor", &"combat"]:
 		var path := "res://rooms/%s.room.txt" % String(id)
 		if not FileAccess.file_exists(path):
 			continue
@@ -358,6 +355,59 @@ func _grow_floor_clusters(rng: RandomNumberGenerator) -> void:
 				break
 
 
+func _grow_basement_cluster(rng: RandomNumberGenerator) -> void:
+	## Expand the undercroft storey (-1) with corridor/combat/hall neighbors.
+	var under: Placement = null
+	for p in _placements:
+		if p.role == "undercroft" or p.module_id == &"undercroft":
+			under = p
+			break
+	if under == null:
+		return
+	var want := params.lower_cluster_target()
+	var nodes: Array[Placement] = [under]
+	var guards := 0
+	var placed := 0
+	while placed < want and guards < 60:
+		guards += 1
+		var base: Placement = nodes[rng.randi_range(0, nodes.size() - 1)]
+		var attach_lv := -1
+		var dirs: Array[ModuleContract.Dir] = [
+			ModuleContract.Dir.N,
+			ModuleContract.Dir.E,
+			ModuleContract.Dir.S,
+			ModuleContract.Dir.W,
+		]
+		_shuffle(dirs, rng)
+		var grew := false
+		for dir in dirs:
+			if not _can_open_on_world_floor(base, dir, attach_lv):
+				continue
+			var id: StringName = &"combat" if rng.randf() < 0.5 else &"corridor"
+			if rng.randf() < 0.22 and _info(&"hall") != null and _placement_accepts_attach(&"hall", dir):
+				id = &"hall"
+			if not _placement_accepts_attach(id, dir):
+				id = &"corridor"
+			var next := _attach_cell_from(base, dir)
+			var info: ModuleInfo = _info(id)
+			if info == null:
+				continue
+			if not _can_place(next, attach_lv, info.footprint, info.layer_span):
+				continue
+			var opts := {"decor": true}
+			if id == &"combat":
+				opts["enemy_spawns"] = 1
+			var p := _make_placement(id, next, attach_lv, opts, "basement")
+			p.path_floor = attach_lv
+			_commit(p)
+			nodes.append(p)
+			placed += 1
+			grew = true
+			break
+		if not grew:
+			break
+
+
 func _pick_growth_bases(
 	path_nodes: Array[Placement],
 	rng: RandomNumberGenerator
@@ -372,7 +422,8 @@ func _pick_growth_bases(
 	var order: Array[Placement] = path_nodes.duplicate()
 	_shuffle(order, rng)
 	for node in order:
-		if node.role == "undercroft":
+		## Basement grows via _grow_basement_cluster; keep the main spine on 0+.
+		if node.role == "undercroft" or node.level < 0:
 			continue
 		if not out.has(node):
 			out.append(node)
@@ -433,7 +484,7 @@ func _growth_dir_score(
 	score += away.length() * 0.15
 	score += toward_center.length() * -0.02
 	## Local emptiness around the target cell.
-	score += float(_empty_neighbor_count(next)) * 0.45
+	score += float(_empty_neighbor_count(next, 0)) * 0.45
 	if int(dir) == last_dir:
 		score -= 0.55 * float(streak)
 		if streak >= 2:
@@ -462,13 +513,13 @@ func _occupied_centroid() -> Vector2:
 	return Vector2(sx / float(n), sz / float(n))
 
 
-func _empty_neighbor_count(cell: Vector2i) -> int:
+func _empty_neighbor_count(cell: Vector2i, level: int = 0) -> int:
 	var n := 0
 	for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
 		var c: Vector2i = cell + d
 		if c.x < 0 or c.y < 0 or c.x >= params.grid_w() or c.y >= params.grid_d():
 			continue
-		if not _occ.has(Vector3i(c.x, 0, c.y)):
+		if not _occ.has(Vector3i(c.x, level, c.y)):
 			n += 1
 	return n
 
@@ -486,8 +537,6 @@ func _place_side_rooms(rng: RandomNumberGenerator) -> void:
 	var want := params.side_room_target()
 	var anchors: Array[Placement] = []
 	for p in _placements:
-		if p.role == "undercroft":
-			continue
 		anchors.append(p)
 	if anchors.is_empty():
 		return
@@ -505,6 +554,9 @@ func _place_side_rooms(rng: RandomNumberGenerator) -> void:
 		_shuffle(dirs, rng)
 		var dir: ModuleContract.Dir = dirs[0]
 		var lv := _attach_level_for(base, dir)
+		## Undercroft / basement modules attach on -1; keep them there.
+		if base.level < 0:
+			lv = base.level
 		if not _can_open_on_world_floor(base, dir, lv):
 			continue
 		var cell := _attach_cell_from(base, dir)
@@ -519,7 +571,8 @@ func _place_side_rooms(rng: RandomNumberGenerator) -> void:
 		var opts := {"decor": true}
 		if id == &"combat":
 			opts["enemy_spawns"] = 1
-		var side := _make_placement(id, cell, lv, opts, "side")
+		var role := "basement" if lv < 0 else "side"
+		var side := _make_placement(id, cell, lv, opts, role)
 		side.path_floor = lv
 		_commit(side)
 		placed += 1
@@ -534,7 +587,7 @@ func _place_loops(rng: RandomNumberGenerator) -> void:
 	for p in _placements:
 		for ly in p.layer_span:
 			var lv := p.level + ly
-			if lv >= 0 and not levels.has(lv):
+			if not levels.has(lv):
 				levels.append(lv)
 	if levels.is_empty():
 		levels.append(0)
@@ -559,7 +612,8 @@ func _place_loops(rng: RandomNumberGenerator) -> void:
 		var info: ModuleInfo = _info(&"corridor")
 		if info == null or not _can_place(cell, lv, info.footprint, info.layer_span):
 			continue
-		var loop_p := _make_placement(&"corridor", cell, lv, {"decor": true}, "loop")
+		var role := "basement" if lv < 0 else "loop"
+		var loop_p := _make_placement(&"corridor", cell, lv, {"decor": true}, role)
 		loop_p.path_floor = lv
 		_commit(loop_p)
 		placed += 1
@@ -692,86 +746,6 @@ func _place_carve_bites(rng: RandomNumberGenerator) -> void:
 			break
 		if not bit:
 			continue
-
-
-func _ensure_exit(rng: RandomNumberGenerator) -> void:
-	for p in _placements:
-		if p.module_id == &"exit" or bool(p.opts.get("exit", false)):
-			return
-
-	var start_cell := _placements[0].cell
-	## Prefer ground-floor exits — upper-only islands were winning "farthest" and
-	## leaving the exit unreachable from spawn.
-	var best: Placement = null
-	var best_d := -1
-	for p in _placements:
-		if p.role == "undercroft" or p.role == "start":
-			continue
-		if p.level != 0:
-			continue
-		var d: int = absi(p.cell.x - start_cell.x) + absi(p.cell.y - start_cell.y)
-		if d > best_d:
-			best_d = d
-			best = p
-
-	if best != null and best.module_id == &"corridor":
-		_uncommit(best)
-		_commit(
-			_make_placement(
-				&"exit", best.cell, best.level, {"decor": true, "exit": true}, "exit"
-			)
-		)
-		return
-
-	var anchors: Array[Placement] = []
-	if best != null:
-		anchors.append(best)
-	for p in _placements:
-		if p.role == "undercroft" or p == best:
-			continue
-		## Any module that occupies ground can host a ground-floor doorway.
-		if p.level > 0:
-			continue
-		anchors.append(p)
-	## Start last so we prefer farther anchors first, then fall back to spawn room.
-	for p in _placements:
-		if p.role == "start" and p.level == 0 and not anchors.has(p):
-			anchors.append(p)
-	var dirs: Array[ModuleContract.Dir] = [
-		ModuleContract.Dir.E,
-		ModuleContract.Dir.W,
-		ModuleContract.Dir.S,
-		ModuleContract.Dir.N,
-	]
-	for anchor in anchors:
-		_shuffle(dirs, rng)
-		for dir in dirs:
-			## Always place the exit on ground, even if the path has climbed.
-			var lv := 0
-			if not _can_open_on_world_floor(anchor, dir, lv):
-				continue
-			var cell := _attach_cell_from(anchor, dir)
-			var info: ModuleInfo = _info(&"exit")
-			if info == null:
-				continue
-			if not _can_place(cell, lv, info.footprint, info.layer_span):
-				continue
-			var exit_p := _make_placement(&"exit", cell, lv, {"decor": true, "exit": true}, "exit")
-			exit_p.path_floor = lv
-			_commit(exit_p)
-			return
-
-	## Last resort: mark a ground module as the exit (including start).
-	for p in _placements:
-		if p.role == "undercroft":
-			continue
-		if p.level != 0:
-			continue
-		p.opts["exit"] = true
-		p.role = "exit"
-		return
-
-	LoudError.report("HybridGen", "Failed to place an exit module in the harness")
 
 
 func _make_placement(

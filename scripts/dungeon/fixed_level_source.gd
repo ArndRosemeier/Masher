@@ -6,7 +6,7 @@ extends LevelSource
 ##   undercroft 20x10 at vertical level -1 under the atrium (U/D shaft)
 ##   atrium 3x3 at (0,0) level 0 — multi-layer start (spawn on ground, stairs up)
 ##   then east chain on level 0 (same doorway floor as atrium's east gap):
-##   (3,1) corridor --E-- (4,1) combat --E-- (5,1) corridor --E-- (6,1) exit
+##   (3,1) corridor --E-- (4,1) combat --E-- (5,1) corridor --E-- (6,1) hall (loot)
 
 
 func build_dungeon() -> Node3D:
@@ -33,7 +33,7 @@ func build_dungeon() -> Node3D:
 	_place(root, Vector2i(3, 1), 0, &"corridor", [ModuleContract.Dir.W, ModuleContract.Dir.E], {"decor": true})
 	_place(root, Vector2i(4, 1), 0, &"combat", [ModuleContract.Dir.W, ModuleContract.Dir.E], {"enemy_spawns": 2, "decor": true})
 	_place(root, Vector2i(5, 1), 0, &"corridor", [ModuleContract.Dir.W, ModuleContract.Dir.E], {"decor": true})
-	_place(root, Vector2i(6, 1), 0, &"exit", [ModuleContract.Dir.W], {"exit": true, "decor": true})
+	_place(root, Vector2i(6, 1), 0, &"hall", [ModuleContract.Dir.W], {"decor": true, "loot_chest": true})
 
 	return root
 

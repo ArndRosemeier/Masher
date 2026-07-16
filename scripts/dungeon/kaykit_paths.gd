@@ -21,5 +21,10 @@ const STAIRS_WOOD := DUNGEON + "/stairs_wood.gltf.glb"
 const BARRIER := DUNGEON + "/barrier.gltf.glb"
 
 const SKELETON_WARRIOR := "res://assets/kaykit/skeletons/Characters/gltf/Skeleton_Warrior.glb"
+const SKELETON_MINION := "res://assets/kaykit/skeletons/Characters/gltf/Skeleton_Minion.glb"
+const SKELETON_MAGE := "res://assets/kaykit/skeletons/Characters/gltf/Skeleton_Mage.glb"
+const SKELETON_ROGUE := "res://assets/kaykit/skeletons/Characters/gltf/Skeleton_Rogue.glb"
 
 const DOOR_SCENE := "res://scenes/dungeon/door.tscn"
+const LOOT_CHEST_SCENE := "res://scenes/loot/loot_chest.tscn"
+const BOOK_PICKUP_SCENE := "res://scenes/loot/book_pickup.tscn"

@@ -645,22 +645,28 @@ static func _add_stair_ramp(
 	rise: float,
 	width: float
 ) -> void:
-	## One walkable wedge through the tread noses: collision the player can
-	## actually climb, plus a visual prism closing the gaps under the treads.
+	## Slope reaches full height before the cell edge, then a flat top runs into
+	## the landing. The wedge's only vertical face sits under the landing floor
+	## (past `endp`) so the capsule never meets a wall at the top seam.
 	var lat := Vector3(axis.z, 0.0, -axis.x)
 	var hw := width * 0.5
 	var start := origin
 	var endp := origin + axis * run_len
-	var top_off := Vector3(0.0, rise, 0.0)
+	## Reach full height ~0.5m before the seam (capsule radius is 0.35).
+	var flat_start := origin + axis * maxf(run_len - 0.55, run_len * 0.7)
+	var pad := endp + axis * 0.85
+	var top := Vector3(0.0, rise, 0.0)
 
 	var wedge := ConvexPolygonShape3D.new()
 	wedge.points = PackedVector3Array([
 		start - lat * hw,
 		start + lat * hw,
-		endp - lat * hw,
-		endp + lat * hw,
-		endp - lat * hw + top_off,
-		endp + lat * hw + top_off,
+		pad - lat * hw,
+		pad + lat * hw,
+		flat_start - lat * hw + top,
+		flat_start + lat * hw + top,
+		pad - lat * hw + top,
+		pad + lat * hw + top,
 	])
 	var body := StaticBody3D.new()
 	body.name = "StairRamp"
@@ -728,7 +734,32 @@ static func _add_markers(room: RoomModule, spec: RoomSpec) -> void:
 					RoomCells.Kind.EXIT:
 						_marker(room, "Exit", ModuleContract.GROUP_EXIT, pos)
 					RoomCells.Kind.ENEMY:
+						pos = _enemy_spawn_pos(spec, level, x, z)
 						_marker(room, "EnemySpawn_%d_%d_%d" % [level, x, z], ModuleContract.GROUP_ENEMY_SPAWN, pos)
+
+
+static func _enemy_spawn_pos(spec: RoomSpec, level: int, x: int, z: int) -> Vector3:
+	## Keep mobs off closed-door planes so meshes don't poke through the panel.
+	var pos := spec.cell_center(level, x, z) + Vector3(0.0, 0.15, 0.0)
+	var cs := spec.cell_size
+	var inset := 1.85
+	var max_x := float(spec.width) * cs
+	var max_z := float(spec.depth) * cs
+	for dir in spec.open_dirs:
+		if ModuleContract.is_vertical(dir):
+			continue
+		if not _face_open(spec, dir, level):
+			continue
+		match dir:
+			ModuleContract.Dir.N:
+				pos.z = maxf(pos.z, inset)
+			ModuleContract.Dir.S:
+				pos.z = minf(pos.z, max_z - inset)
+			ModuleContract.Dir.W:
+				pos.x = maxf(pos.x, inset)
+			ModuleContract.Dir.E:
+				pos.x = minf(pos.x, max_x - inset)
+	return pos
 
 
 static func _add_connectors(room: RoomModule, spec: RoomSpec) -> void:

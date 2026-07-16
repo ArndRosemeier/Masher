@@ -54,6 +54,15 @@ func _go() -> void:
 			0.0,
 			true
 		),
+		WalkCase.new(
+			"atrium D up from undercroft",
+			Vector3(5.0, -3.1, 16.0),
+			Vector3(0.0, 0.0, -1.0),
+			420,
+			-4.0,
+			0.0,
+			true
+		),
 	]
 
 	var failed := 0
@@ -86,7 +95,8 @@ func _walk_case(c: WalkCase) -> bool:
 		under.position = ModuleContract.grid_to_world(Vector2i.ZERO, -1)
 		root.add_child(under)
 
-	## Same capsule as scenes/player/player.tscn.
+	## Same capsule + floor settings as scenes/player/player.tscn.
+	## Start Y is capsule-center height (~floor + 0.9), matching prior cases.
 	var body := CharacterBody3D.new()
 	var shape := CollisionShape3D.new()
 	var capsule := CapsuleShape3D.new()
@@ -95,6 +105,9 @@ func _walk_case(c: WalkCase) -> bool:
 	shape.shape = capsule
 	body.add_child(shape)
 	body.collision_mask = 1
+	body.floor_stop_on_slope = true
+	body.floor_max_angle = 1.2
+	body.floor_snap_length = 0.3
 	root.add_child(body)
 	body.global_position = c.start
 
@@ -118,10 +131,16 @@ func _walk_case(c: WalkCase) -> bool:
 
 	## Capsule center rests ~0.8 above the floor; allow slack for landing bounce.
 	## When the case starts already on a tread, min_y may be > expect_min_y.
-	var reached_top := max_y >= c.expect_max_y + 0.6
+	var reached_top := max_y >= c.expect_max_y + 0.55
 	var reached_bottom := min_y <= c.expect_min_y + 1.5
 	var climbed := max_y - min_y >= maxf(1.5, (c.expect_max_y - c.expect_min_y) * 0.5)
-	var ok := reached_top and (reached_bottom or climbed)
+	## Climb-up cases must also clear the top seam (not stall on the last step).
+	var cleared_seam := true
+	if c.dir.length() > 0.01 and c.expect_max_y > c.expect_min_y:
+		var along := c.dir.normalized()
+		var progress := (body.global_position - c.start).dot(along)
+		cleared_seam = progress > 1.0 or max_y >= c.expect_max_y + 0.7
+	var ok := reached_top and (reached_bottom or climbed) and cleared_seam
 	print(
 		"%s %s | final=%s max_y=%.2f min_y=%.2f (expected floor span %.1f..%.1f)"
 		% [

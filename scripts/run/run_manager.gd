@@ -1,6 +1,9 @@
 class_name RunManager
 extends Node
-## Owns create-UI → generate → spawn → death/win back to create.
+## Owns create-UI → generate → spawn → death back to create.
+
+const _EnemyDef := preload("res://scripts/enemies/enemy_def.gd")
+const _Abilities := preload("res://scripts/progression/ability_catalog.gd")
 
 @export var player_scene: PackedScene
 @export var enemy_scene: PackedScene
@@ -11,12 +14,16 @@ extends Node
 
 var _create_ui: CanvasLayer
 var _dungeon: Node3D
-var _player: PlayerController
-var _exit_area: Area3D
+var _player: Node
 var _pending_params: DungeonGenParams
+var _spawn_rng := RandomNumberGenerator.new()
 
 
 func _ready() -> void:
+	if get_script() == null:
+		const Loud := preload("res://scripts/core/loud_error.gd")
+		Loud.fatal("Boot", "RunManager script failed to attach", get_tree())
+		return
 	if player_scene == null:
 		player_scene = load("res://scenes/player/player.tscn") as PackedScene
 	if enemy_scene == null:
@@ -32,7 +39,6 @@ func _ready() -> void:
 
 
 func _boot_create_ui() -> bool:
-	## Script parse failures used to leave a naked CanvasLayer and an empty world.
 	const UI_SCRIPT := "res://scripts/ui/create_run_ui.gd"
 	const UI_SCENE := "res://scenes/ui/create_run.tscn"
 	const Loud := preload("res://scripts/core/loud_error.gd")
@@ -73,7 +79,6 @@ func _boot_create_ui() -> bool:
 		Loud.fatal("Boot", "CreateRunUI missing show_create()", get_tree())
 		return false
 
-	## Deferred: Main is still finishing _ready children setup.
 	get_parent().add_child.call_deferred(_create_ui)
 	_create_ui.generate_requested.connect(_on_generate_requested)
 	_create_ui.fixed_poc_requested.connect(_on_fixed_poc_requested)
@@ -99,6 +104,8 @@ func _on_fixed_poc_requested() -> void:
 
 func begin_run(params: DungeonGenParams, use_fixed_poc: bool) -> void:
 	_clear_world()
+	if hud.has_method("clear_dungeon_map"):
+		hud.clear_dungeon_map()
 	GameState.reset_for_new_run()
 	_create_ui.hide_create()
 
@@ -106,6 +113,7 @@ func begin_run(params: DungeonGenParams, use_fixed_poc: bool) -> void:
 		var source := FixedLevelSource.new()
 		_dungeon = source.build_dungeon()
 		GameState.store_params(null, 0)
+		_spawn_rng.seed = 1
 		world_root.add_child(_dungeon)
 		DungeonGenValidator.validate_or_assert(_dungeon, "FixedPOC")
 		_finish_spawn(true)
@@ -115,6 +123,7 @@ func begin_run(params: DungeonGenParams, use_fixed_poc: bool) -> void:
 	var gen := HybridDungeonGenerator.new(params)
 	_dungeon = gen.build_dungeon()
 	GameState.store_params(params, gen.resolved_seed())
+	_spawn_rng.seed = gen.resolved_seed()
 	world_root.add_child(_dungeon)
 	DungeonGenValidator.validate_or_assert(_dungeon, "HybridGen")
 	_finish_spawn(false)
@@ -123,8 +132,9 @@ func begin_run(params: DungeonGenParams, use_fixed_poc: bool) -> void:
 func _finish_spawn(fixed_poc: bool) -> void:
 	_spawn_player()
 	_spawn_enemies()
-	_setup_exit()
 	AudioManager.start_ambient()
+	if hud.has_method("bind_dungeon_map"):
+		hud.bind_dungeon_map()
 	if hud.has_method("show_playing"):
 		hud.show_playing()
 	if hud.has_method("set_run_info"):
@@ -158,7 +168,6 @@ func _clear_world() -> void:
 		child.free()
 	_player = null
 	_dungeon = null
-	_exit_area = null
 	Engine.time_scale = 1.0
 
 
@@ -174,63 +183,37 @@ func _spawn_player() -> void:
 	var markers := _markers_in_dungeon(ModuleContract.GROUP_PLAYER_SPAWN)
 	assert(markers.size() > 0, "Level missing PlayerSpawn marker")
 	var spawn := markers[0]
-	_player = player_scene.instantiate() as PlayerController
+	_player = player_scene.instantiate()
 	entities.add_child(_player)
-	_player.global_position = spawn.global_position + Vector3(0.0, 0.1, 0.0)
-	_player.died.connect(_on_player_died)
-	_player.health_changed.connect(_on_player_health_changed)
-	_player.interact_hint_changed.connect(_on_interact_hint_changed)
-	_on_player_health_changed(_player.health, _player.max_health)
+	(_player as Node3D).global_position = spawn.global_position + Vector3(0.0, 0.1, 0.0)
+	_player.connect("died", _on_player_died)
+	_player.connect("health_changed", _on_player_health_changed)
+	_player.connect("mana_changed", _on_player_mana_changed)
+	_player.connect("stamina_changed", _on_player_stamina_changed)
+	_player.connect("interact_hint_changed", _on_interact_hint_changed)
+	_player.connect("toast_message", _on_toast)
+	var inv: Node = _player.get_node("Inventory")
+	var prog: Node = _player.get_node("Progression")
+	var hp: Node = _player.get_node("Health")
+	var mp: Node = _player.get_node("Mana")
+	var sp: Node = _player.get_node("Stamina")
+	inv.connect("changed", _on_inventory_changed)
+	prog.connect("ranks_changed", _on_hotbar_changed)
+	prog.connect("hotbar_changed", _on_hotbar_changed)
+	_on_player_health_changed(int(hp.get("current")), int(hp.get("max_health")))
+	_on_player_mana_changed(float(mp.get("current")), float(mp.get("max_value")))
+	_on_player_stamina_changed(float(sp.get("current")), float(sp.get("max_value")))
+	_on_inventory_changed()
+	_on_hotbar_changed()
 
 
 func _spawn_enemies() -> void:
 	var markers := _markers_in_dungeon(ModuleContract.GROUP_ENEMY_SPAWN)
 	for marker in markers:
-		var enemy := enemy_scene.instantiate() as EnemyController
+		var enemy: Node3D = enemy_scene.instantiate()
 		entities.add_child(enemy)
 		enemy.global_position = marker.global_position + Vector3(0.0, 0.1, 0.0)
-
-
-func _setup_exit() -> void:
-	var exits := _markers_in_dungeon(ModuleContract.GROUP_EXIT)
-	assert(exits.size() > 0, "Level missing Exit marker")
-	var exit_marker := exits[0]
-
-	_exit_area = Area3D.new()
-	_exit_area.name = "ExitTrigger"
-	_exit_area.collision_layer = 0
-	_exit_area.collision_mask = 2
-	_exit_area.monitoring = true
-	var shape := CollisionShape3D.new()
-	var sphere := SphereShape3D.new()
-	sphere.radius = 1.4
-	shape.shape = sphere
-	_exit_area.add_child(shape)
-
-	var mesh := MeshInstance3D.new()
-	var sphere_mesh := SphereMesh.new()
-	sphere_mesh.radius = 0.35
-	sphere_mesh.height = 0.7
-	var mat := StandardMaterial3D.new()
-	mat.emission_enabled = true
-	mat.emission = Color(0.45, 0.9, 0.55)
-	mat.emission_energy_multiplier = 2.5
-	mat.albedo_color = Color(0.3, 0.7, 0.4, 0.5)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mesh.mesh = sphere_mesh
-	mesh.material_override = mat
-	_exit_area.add_child(mesh)
-
-	entities.add_child(_exit_area)
-	_exit_area.global_position = exit_marker.global_position + Vector3(0.0, 1.0, 0.0)
-	_exit_area.body_entered.connect(_on_exit_body_entered)
-
-
-func _on_exit_body_entered(body: Node3D) -> void:
-	if GameState.phase != GameState.RunPhase.PLAYING:
-		return
-	if body is PlayerController:
-		_on_player_won()
+		enemy.call("apply_def", _EnemyDef.pick_random(_spawn_rng))
 
 
 func _on_player_health_changed(current: int, maximum: int) -> void:
@@ -238,25 +221,74 @@ func _on_player_health_changed(current: int, maximum: int) -> void:
 		hud.set_health(current, maximum)
 
 
+func _on_player_mana_changed(current: float, maximum: float) -> void:
+	if hud.has_method("set_mana"):
+		hud.set_mana(current, maximum)
+
+
+func _on_player_stamina_changed(current: float, maximum: float) -> void:
+	if hud.has_method("set_stamina"):
+		hud.set_stamina(current, maximum)
+
+
 func _on_interact_hint_changed(text: String) -> void:
 	if hud.has_method("set_interact_hint"):
 		hud.set_interact_hint(text)
 
 
+func _on_toast(text: String) -> void:
+	if hud.has_method("show_toast"):
+		hud.show_toast(text)
+
+
+func _on_inventory_changed() -> void:
+	if _player == null or not hud.has_method("set_inventory"):
+		return
+	var inv: Node = _player.get_node("Inventory")
+	hud.set_inventory(
+		inv.call("stacks"),
+		int(inv.get("selected_index")),
+		bool(_player.get("inventory_open"))
+	)
+
+
+func _on_hotbar_changed() -> void:
+	if _player == null or not hud.has_method("set_hotbar"):
+		return
+	var prog: Node = _player.get_node("Progression")
+	var hotbar: Array = prog.get("hotbar")
+	var labels: Array[String] = []
+	for i in hotbar.size():
+		var id: StringName = hotbar[i]
+		if id == &"":
+			labels.append("%d: —" % (i + 1))
+			continue
+		var def = _Abilities.by_id(id)
+		var rank: int = int(prog.call("rank_of", id))
+		var label_name: String = def.display_name if def != null else String(id)
+		labels.append("%d: %s %s" % [i + 1, label_name, _roman(rank)])
+	hud.set_hotbar(labels)
+
+
+func _roman(n: int) -> String:
+	match n:
+		1:
+			return "I"
+		2:
+			return "II"
+		3:
+			return "III"
+		4:
+			return "IV"
+		5:
+			return "V"
+	return str(n)
+
+
 func _on_player_died() -> void:
 	GameState.set_phase(GameState.RunPhase.DEAD)
-	if _player:
-		_player.set_input_enabled(false)
+	if _player != null and _player.has_method("set_input_enabled"):
+		_player.call("set_input_enabled", false)
 	if hud.has_method("show_dead"):
 		hud.show_dead()
-	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-
-
-func _on_player_won() -> void:
-	GameState.set_phase(GameState.RunPhase.WON)
-	AudioManager.play_exit()
-	if _player:
-		_player.set_input_enabled(false)
-	if hud.has_method("show_won"):
-		hud.show_won()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE

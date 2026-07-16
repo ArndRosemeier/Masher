@@ -14,10 +14,12 @@ Modules are built by `RoomFactory` and obey `ModuleContract`:
 1. Start stack: `atrium` + `undercroft` when they fit (else `stair_test` / 1×1)
 2. **2D branched growth** toward underfilled space (N/E/S/W), sized by harness *area*
 3. **Stairs raise the path floor** — upper landings grow real room clusters (not orphan balconies)
-4. Side rooms + loop fillers on every occupied storey
-5. Guaranteed `exit`; `open_dirs` / `open_faces` / doorway cells from adjacency
-6. `CarveMerger` bites: intentional 1-cell overlaps (guest empties shared ASCII, host opens it)
-7. Stacked stair climbs up to `max_stair_rises` with upper foyers + floor clusters
+4. **Basement cluster** — undercroft grows corridor/combat/hall neighbors on level `-1`
+5. Side rooms + loop fillers on every occupied storey (including `-1`)
+6. `open_dirs` / `open_faces` / doorway cells from adjacency (no exit win room)
+7. `CarveMerger` bites: intentional 1-cell overlaps (guest empties shared ASCII, host opens it)
+8. Stacked stair climbs up to `max_stair_rises` with upper foyers + floor clusters
+9. Loot chests in combat/hall rooms; dive ends on death (books / mana / stamina combat)
 
 Params: `DungeonGenParams` (width/depth/height in meters → module grid + floor count).
 
@@ -25,14 +27,14 @@ Params: `DungeonGenParams` (width/depth/height in meters → module grid + floor
 
 `DungeonGenValidator` checks a built dungeon root:
 
-- exactly one `player_spawn`, at least one `exit`
+- exactly one `player_spawn`
 - every module `RoomSpec` passes `RoomValidators`
 - no footprint overlaps (except intentional `carve_ok` unions)
 - every horizontal door faces a paired peer (no door into void)
 - up/down stair links have landings
-- **perimeter / abyss:** every walkable edge cell is either a paired doorway or a baked `DoorSeal` (catches unsealed upper landings)
+- **perimeter / abyss:** every walkable edge cell is either a paired doorway or a baked `DoorSeal`
 - Runs automatically on every playable generate / Fixed POC via `RunManager`
-- exit (and non-undercroft modules) reachable from spawn on the F1 map graph
+- all modules (including undercroft + basement) reachable from spawn on the F1 map graph
 
 Headless CI suite (fixed seeds × Tiny/Small/Medium + Fixed POC + seal regression):
 

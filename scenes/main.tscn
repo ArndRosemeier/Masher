@@ -1,9 +1,10 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=6 format=3]
 
 [ext_resource type="Script" path="res://scripts/run/run_manager.gd" id="1_run"]
 [ext_resource type="PackedScene" path="res://scenes/ui/hud.tscn" id="2_hud"]
 [ext_resource type="PackedScene" path="res://scenes/player/player.tscn" id="3_player"]
 [ext_resource type="PackedScene" path="res://scenes/enemies/enemy.tscn" id="4_enemy"]
+[ext_resource type="Script" path="res://scripts/run/boot_guard.gd" id="5_boot"]
 
 [sub_resource type="Environment" id="Environment_mood"]
 background_mode = 1
@@ -48,3 +49,6 @@ shadow_enabled = false
 script = ExtResource("1_run")
 player_scene = ExtResource("3_player")
 enemy_scene = ExtResource("4_enemy")
+
+[node name="BootGuard" type="Node" parent="."]
+script = ExtResource("5_boot")

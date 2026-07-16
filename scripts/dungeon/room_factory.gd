@@ -14,28 +14,37 @@ static func build(
 	assert(FileAccess.file_exists(path), "Missing room spec: %s" % path)
 
 	var spec := RoomSpecParser.parse_file(path)
-	# Caller open_dirs win when provided (layout assembly); else file meta.
-	if not open_dirs.is_empty():
+	## Procgen passes force_open_dirs so empty means "no doors" (never fall back to file meta).
+	if bool(opts.get("force_open_dirs", false)):
+		spec.open_dirs = open_dirs.duplicate()
+	elif not open_dirs.is_empty():
 		spec.open_dirs = open_dirs.duplicate()
 
-	var require_player := bool(opts.get("player_spawn", false))
-	var require_exit := bool(opts.get("exit", false))
-	# Also honor markers already in the ASCII
+	if bool(opts.get("clear_player", false)):
+		_clear_kind(spec, RoomCells.Kind.PLAYER)
+	if bool(opts.get("player_spawn", false)):
+		_ensure_marker(spec, RoomCells.Kind.PLAYER)
+	if bool(opts.get("exit", false)):
+		_ensure_marker(spec, RoomCells.Kind.EXIT)
+
+	var want_player := bool(opts.get("player_spawn", false))
+	var want_exit := bool(opts.get("exit", false))
+	## Honor markers present after optional inject/clear.
 	for level in spec.layer_count():
 		for z in spec.depth:
 			for x in spec.width:
 				var k: int = spec.get_cell(level, x, z)
 				if k == RoomCells.Kind.PLAYER:
-					require_player = true
+					want_player = true
 				elif k == RoomCells.Kind.EXIT:
-					require_exit = true
+					want_exit = true
 
 	# Optional: inject enemy markers if opts request more than ASCII provides
 	var enemy_count: int = int(opts.get("enemy_spawns", 0))
 	if enemy_count > 0:
 		_ensure_enemy_markers(spec, enemy_count)
 
-	RoomValidators.validate_or_assert(spec, require_player, require_exit)
+	RoomValidators.validate_or_assert(spec, want_player, want_exit)
 	var room := RoomBaker.bake(spec)
 	room.spec = spec
 	room.add_to_group(ModuleContract.GROUP_MODULE)
@@ -44,9 +53,36 @@ static func build(
 	if dress:
 		_add_torches(room, spec)
 		_add_sparse_decor(room, spec, module_id)
-	if bool(opts.get("exit", false)) or require_exit:
+	if bool(opts.get("exit", false)) or want_exit:
 		_place_exit_chest(room, spec)
 	return room
+
+
+static func _clear_kind(spec: RoomSpec, kind: int) -> void:
+	for level in spec.layer_count():
+		for z in spec.depth:
+			for x in spec.width:
+				if spec.get_cell(level, x, z) == kind:
+					spec.set_cell(level, x, z, RoomCells.Kind.FLOOR)
+
+
+static func _ensure_marker(spec: RoomSpec, kind: int) -> void:
+	for level in spec.layer_count():
+		for z in spec.depth:
+			for x in spec.width:
+				if spec.get_cell(level, x, z) == kind:
+					return
+	## Place on a central walkable floor cell of layer 0.
+	var cx := spec.width / 2
+	var cz := spec.depth / 2
+	for z in spec.depth:
+		for x in spec.width:
+			var wx := (cx + x) % spec.width
+			var wz := (cz + z) % spec.depth
+			if RoomCells.is_floor_surface(spec.get_cell(0, wx, wz)):
+				spec.set_cell(0, wx, wz, kind)
+				return
+	assert(false, "Cannot inject marker %d into %s" % [kind, spec.id])
 
 
 static func _ensure_enemy_markers(spec: RoomSpec, count: int) -> void:

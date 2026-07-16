@@ -112,7 +112,7 @@ static func _commit_layer(spec: RoomSpec, _level: int, rows: Array[String], sour
 			var ch := String(row[c])
 			var kind: int = RoomCells.from_char(ch)
 			assert(
-				kind != RoomCells.Kind.EMPTY or ch == ".",
+				kind != RoomCells.Kind.EMPTY or ch == " ",
 				"%s: unknown char '%s' at %d,%d" % [source_name, ch, c, r]
 			)
 			cells.append(kind)

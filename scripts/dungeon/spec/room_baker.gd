@@ -46,8 +46,15 @@ static func _cell_needs_floor(kind: int) -> bool:
 
 
 static func _add_floors(room: RoomModule, spec: RoomSpec, stair_skip_floor: Dictionary) -> void:
-	# Collision per cell (no visual seams). KayKit tiles are the visible floor.
+	# Collision per cell (no visual seams). KayKit tiles are the visible top.
+	# Underside meshes close the see-through gap when looking up from below
+	# (KayKit GLBs are typically single-sided).
 	# `stair_skip_floor` = open shaft / upper stairwell (no floor).
+	var under_mat := StandardMaterial3D.new()
+	under_mat.albedo_color = Color(0.12, 0.11, 0.1)
+	under_mat.roughness = 0.95
+	under_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+
 	for level in spec.layer_count():
 		for z in spec.depth:
 			for x in spec.width:
@@ -65,6 +72,15 @@ static func _add_floors(room: RoomModule, spec: RoomSpec, stair_skip_floor: Dict
 					Vector3(center.x, y - thickness * 0.5, center.z),
 					Vector3(spec.cell_size, thickness, spec.cell_size)
 				)
+				## Visual slab so the floor reads as a ceiling from below.
+				var under := MeshInstance3D.new()
+				under.name = "FloorUnder_%d_%d_%d" % [level, x, z]
+				var under_mesh := BoxMesh.new()
+				under_mesh.size = Vector3(spec.cell_size, thickness, spec.cell_size)
+				under.mesh = under_mesh
+				under.material_override = under_mat
+				under.position = Vector3(center.x, y - thickness * 0.5, center.z)
+				room.add_child(under)
 
 		_add_kaykit_floor_tiles(room, spec, level, stair_skip_floor)
 
@@ -235,45 +251,63 @@ const MIN_STEP_DEPTH := 0.28
 static func _add_doorframes(room: RoomModule, spec: RoomSpec) -> void:
 	## Open-edge floor cells would leave a full-cell void (cell_size × layer_height).
 	## Keep one door-sized hole in a thin outer shell; seal other edge gaps the same way.
+	## Multi-layer rooms may open on more than layer 0 — bake every open layer.
 	var wall_mat := StandardMaterial3D.new()
 	wall_mat.albedo_color = Color(0.22, 0.2, 0.18)
 	wall_mat.roughness = 0.95
 
 	for dir in spec.open_dirs:
-		var doorway := _find_doorway_cell(spec, dir)
-		if doorway == Vector2i(-1, -1):
+		if ModuleContract.is_vertical(dir):
 			continue
-		_bake_doorframe_cell(room, spec, doorway, dir, wall_mat)
-		for cell in _edge_walkable_cells(spec, dir):
-			if cell == doorway:
+		for level in spec.layer_count():
+			var edge := _edge_walkable_cells(spec, level, dir)
+			if edge.is_empty():
 				continue
-			_bake_edge_seal_wall(room, spec, cell, dir, wall_mat)
+			var doorway := _pick_doorway_cell(spec, edge)
+			_bake_doorframe_cell(room, spec, level, doorway, dir, wall_mat)
+			for cell in edge:
+				if cell == doorway:
+					continue
+				_bake_edge_seal_wall(room, spec, level, cell, dir, wall_mat)
 
 
-static func _edge_walkable_cells(spec: RoomSpec, dir: ModuleContract.Dir) -> Array[Vector2i]:
+static func _edge_walkable_cells(spec: RoomSpec, level: int, dir: ModuleContract.Dir) -> Array[Vector2i]:
 	var cells: Array[Vector2i] = []
 	match dir:
 		ModuleContract.Dir.E:
 			for z in spec.depth:
-				if RoomCells.is_walkable(spec.get_cell(0, spec.width - 1, z)):
+				if RoomCells.is_walkable(spec.get_cell(level, spec.width - 1, z)):
 					cells.append(Vector2i(spec.width - 1, z))
 		ModuleContract.Dir.W:
 			for z in spec.depth:
-				if RoomCells.is_walkable(spec.get_cell(0, 0, z)):
+				if RoomCells.is_walkable(spec.get_cell(level, 0, z)):
 					cells.append(Vector2i(0, z))
 		ModuleContract.Dir.S:
 			for x in spec.width:
-				if RoomCells.is_walkable(spec.get_cell(0, x, spec.depth - 1)):
+				if RoomCells.is_walkable(spec.get_cell(level, x, spec.depth - 1)):
 					cells.append(Vector2i(x, spec.depth - 1))
 		ModuleContract.Dir.N:
 			for x in spec.width:
-				if RoomCells.is_walkable(spec.get_cell(0, x, 0)):
+				if RoomCells.is_walkable(spec.get_cell(level, x, 0)):
 					cells.append(Vector2i(x, 0))
 	return cells
 
 
+static func _pick_doorway_cell(spec: RoomSpec, candidates: Array[Vector2i]) -> Vector2i:
+	assert(not candidates.is_empty(), "doorway pick requires candidates")
+	var mid := Vector2(float(spec.width) * 0.5, float(spec.depth) * 0.5)
+	var best := candidates[0]
+	var best_d := INF
+	for c in candidates:
+		var d := Vector2(float(c.x) + 0.5, float(c.y) + 0.5).distance_squared_to(mid)
+		if d < best_d:
+			best_d = d
+			best = c
+	return best
+
+
 static func _door_shell_center(spec: RoomSpec, cell: Vector2i, dir: ModuleContract.Dir) -> Vector3:
-	## Center of a thin wall slab on the outer face of an edge cell.
+	## Center of a thin wall slab on the outer face of an edge cell (y filled by caller).
 	var cs := spec.cell_size
 	var t := DOOR_WALL_THICKNESS
 	var cx := (float(cell.x) + 0.5) * cs
@@ -293,6 +327,7 @@ static func _door_shell_center(spec: RoomSpec, cell: Vector2i, dir: ModuleContra
 static func _bake_edge_seal_wall(
 	room: RoomModule,
 	spec: RoomSpec,
+	level: int,
 	cell: Vector2i,
 	dir: ModuleContract.Dir,
 	wall_mat: StandardMaterial3D
@@ -301,14 +336,15 @@ static func _bake_edge_seal_wall(
 	var wall_h := spec.layer_height
 	var cs := spec.cell_size
 	var face := _door_shell_center(spec, cell, dir)
+	var y0 := float(level) * spec.layer_height
 	var size := Vector3(t, wall_h, cs)
 	match dir:
 		ModuleContract.Dir.N, ModuleContract.Dir.S:
 			size = Vector3(cs, wall_h, t)
 	_wall_piece(
 		room,
-		"DoorSeal_%s_%d_%d" % [ModuleContract.dir_name(dir), cell.x, cell.y],
-		Vector3(face.x, wall_h * 0.5, face.z),
+		"DoorSeal_%s_L%d_%d_%d" % [ModuleContract.dir_name(dir), level, cell.x, cell.y],
+		Vector3(face.x, y0 + wall_h * 0.5, face.z),
 		size,
 		wall_mat
 	)
@@ -317,6 +353,7 @@ static func _bake_edge_seal_wall(
 static func _bake_doorframe_cell(
 	room: RoomModule,
 	spec: RoomSpec,
+	level: int,
 	cell: Vector2i,
 	dir: ModuleContract.Dir,
 	wall_mat: StandardMaterial3D
@@ -325,6 +362,7 @@ static func _bake_doorframe_cell(
 	var t := DOOR_WALL_THICKNESS
 	var wall_h := spec.layer_height
 	var face := _door_shell_center(spec, cell, dir)
+	var y0 := float(level) * spec.layer_height
 	var x0 := float(cell.x) * cs
 	var z0 := float(cell.y) * cs
 
@@ -332,6 +370,7 @@ static func _bake_doorframe_cell(
 	var hole_h := mini(DOOR_OPEN_HEIGHT, wall_h - 0.05)
 	var side := (cs - hole_w) * 0.5
 	var lintel_h := wall_h - hole_h
+	var tag := "%s_L%d" % [ModuleContract.dir_name(dir), level]
 
 	if lintel_h > 0.05:
 		var lintel_size := Vector3(t, lintel_h, cs)
@@ -339,8 +378,8 @@ static func _bake_doorframe_cell(
 			lintel_size = Vector3(cs, lintel_h, t)
 		_wall_piece(
 			room,
-			"DoorLintel_%s" % ModuleContract.dir_name(dir),
-			Vector3(face.x, hole_h + lintel_h * 0.5, face.z),
+			"DoorLintel_%s" % tag,
+			Vector3(face.x, y0 + hole_h + lintel_h * 0.5, face.z),
 			lintel_size,
 			wall_mat
 		)
@@ -350,30 +389,30 @@ static func _bake_doorframe_cell(
 			ModuleContract.Dir.E, ModuleContract.Dir.W:
 				_wall_piece(
 					room,
-					"DoorJambA_%s" % ModuleContract.dir_name(dir),
-					Vector3(face.x, hole_h * 0.5, z0 + side * 0.5),
+					"DoorJambA_%s" % tag,
+					Vector3(face.x, y0 + hole_h * 0.5, z0 + side * 0.5),
 					Vector3(t, hole_h, side),
 					wall_mat
 				)
 				_wall_piece(
 					room,
-					"DoorJambB_%s" % ModuleContract.dir_name(dir),
-					Vector3(face.x, hole_h * 0.5, z0 + cs - side * 0.5),
+					"DoorJambB_%s" % tag,
+					Vector3(face.x, y0 + hole_h * 0.5, z0 + cs - side * 0.5),
 					Vector3(t, hole_h, side),
 					wall_mat
 				)
 			ModuleContract.Dir.N, ModuleContract.Dir.S:
 				_wall_piece(
 					room,
-					"DoorJambA_%s" % ModuleContract.dir_name(dir),
-					Vector3(x0 + side * 0.5, hole_h * 0.5, face.z),
+					"DoorJambA_%s" % tag,
+					Vector3(x0 + side * 0.5, y0 + hole_h * 0.5, face.z),
 					Vector3(side, hole_h, t),
 					wall_mat
 				)
 				_wall_piece(
 					room,
-					"DoorJambB_%s" % ModuleContract.dir_name(dir),
-					Vector3(x0 + cs - side * 0.5, hole_h * 0.5, face.z),
+					"DoorJambB_%s" % tag,
+					Vector3(x0 + cs - side * 0.5, y0 + hole_h * 0.5, face.z),
 					Vector3(side, hole_h, t),
 					wall_mat
 				)
@@ -431,6 +470,8 @@ static func _bake_stairs(room: RoomModule, spec: RoomSpec, runs: Array[StairRun]
 		)
 		origin -= axis * (spec.cell_size * 0.5)
 
+		## Treads are visual only. CharacterBody3D has no step-up logic, so
+		## per-tread collision boxes read as walls and block the climb.
 		for i in steps:
 			var along := step_d * (float(i) + 0.5)
 			var center := origin + axis * along
@@ -439,8 +480,8 @@ static func _bake_stairs(room: RoomModule, spec: RoomSpec, runs: Array[StairRun]
 			var depth := step_d + 0.02
 			var size := Vector3(width, step_h, depth) if absf(axis.z) > 0.5 else Vector3(depth, step_h, width)
 
-			_box(root, "Step_%d" % i, center, size)
 			var mesh := MeshInstance3D.new()
+			mesh.name = "Step_%d" % i
 			var box := BoxMesh.new()
 			box.size = size
 			mesh.mesh = box
@@ -448,15 +489,54 @@ static func _bake_stairs(room: RoomModule, spec: RoomSpec, runs: Array[StairRun]
 			mesh.position = center
 			root.add_child(mesh)
 
-			if i > 0:
-				var fill_h := tread_top - step_h - base_y
-				if fill_h > 0.05:
-					var fill_center := origin + axis * along
-					fill_center.y = base_y + fill_h * 0.5
-					var fill_size := (
-						Vector3(width, fill_h, depth) if absf(axis.z) > 0.5 else Vector3(depth, fill_h, width)
-					)
-					_box(root, "StairFill_%d" % i, fill_center, fill_size)
+		_add_stair_ramp(root, mat, origin, axis, run_len, rise, width)
+
+
+static func _add_stair_ramp(
+	root: Node3D,
+	mat: StandardMaterial3D,
+	origin: Vector3,
+	axis: Vector3,
+	run_len: float,
+	rise: float,
+	width: float
+) -> void:
+	## One walkable wedge through the tread noses: collision the player can
+	## actually climb, plus a visual prism closing the gaps under the treads.
+	var lat := Vector3(axis.z, 0.0, -axis.x)
+	var hw := width * 0.5
+	var start := origin
+	var endp := origin + axis * run_len
+	var top_off := Vector3(0.0, rise, 0.0)
+
+	var wedge := ConvexPolygonShape3D.new()
+	wedge.points = PackedVector3Array([
+		start - lat * hw,
+		start + lat * hw,
+		endp - lat * hw,
+		endp + lat * hw,
+		endp - lat * hw + top_off,
+		endp + lat * hw + top_off,
+	])
+	var body := StaticBody3D.new()
+	body.name = "StairRamp"
+	body.collision_layer = 1
+	body.collision_mask = 0
+	var col := CollisionShape3D.new()
+	col.shape = wedge
+	body.add_child(col)
+	root.add_child(body)
+
+	var prism := PrismMesh.new()
+	prism.left_to_right = 1.0
+	prism.size = Vector3(run_len, rise, width)
+	var prism_inst := MeshInstance3D.new()
+	prism_inst.name = "StairWedge"
+	prism_inst.mesh = prism
+	prism_inst.material_override = mat
+	prism_inst.basis = Basis(axis, Vector3.UP, axis.cross(Vector3.UP))
+	prism_inst.position = origin + axis * (run_len * 0.5) + Vector3(0.0, rise * 0.5, 0.0)
+	root.add_child(prism_inst)
 
 
 static func _add_ceiling(room: RoomModule, spec: RoomSpec) -> void:
@@ -525,28 +605,30 @@ static func _add_connectors(room: RoomModule, spec: RoomSpec) -> void:
 			else:
 				marker.position = Vector3(wx * 0.5, 0.0, wz * 0.5)
 		else:
-			var door_cell := _find_doorway_cell(spec, dir)
+			var door_level := _primary_door_level(spec, dir)
+			var door_cell := _find_doorway_cell(spec, door_level, dir)
+			var y := float(door_level) * spec.layer_height
 			if door_cell != Vector2i(-1, -1):
-				var c := spec.cell_center(0, door_cell.x, door_cell.y)
+				var c := spec.cell_center(door_level, door_cell.x, door_cell.y)
 				match dir:
 					ModuleContract.Dir.N:
-						marker.position = Vector3(c.x, 0.0, 0.0)
+						marker.position = Vector3(c.x, y, 0.0)
 					ModuleContract.Dir.S:
-						marker.position = Vector3(c.x, 0.0, wz)
+						marker.position = Vector3(c.x, y, wz)
 					ModuleContract.Dir.W:
-						marker.position = Vector3(0.0, 0.0, c.z)
+						marker.position = Vector3(0.0, y, c.z)
 					ModuleContract.Dir.E:
-						marker.position = Vector3(wx, 0.0, c.z)
+						marker.position = Vector3(wx, y, c.z)
 			else:
 				match dir:
 					ModuleContract.Dir.N:
-						marker.position = Vector3(wx * 0.5, 0.0, 0.0)
+						marker.position = Vector3(wx * 0.5, y, 0.0)
 					ModuleContract.Dir.S:
-						marker.position = Vector3(wx * 0.5, 0.0, wz)
+						marker.position = Vector3(wx * 0.5, y, wz)
 					ModuleContract.Dir.W:
-						marker.position = Vector3(0.0, 0.0, wz * 0.5)
+						marker.position = Vector3(0.0, y, wz * 0.5)
 					ModuleContract.Dir.E:
-						marker.position = Vector3(wx, 0.0, wz * 0.5)
+						marker.position = Vector3(wx, y, wz * 0.5)
 		room.add_child(marker)
 		room.register_connector(dir, marker)
 
@@ -578,49 +660,56 @@ static func _add_doors(room: RoomModule, spec: RoomSpec) -> void:
 	for dir in spec.open_dirs:
 		if dir != ModuleContract.Dir.E and dir != ModuleContract.Dir.S:
 			continue
-		var door_cell := _find_doorway_cell(spec, dir)
-		if door_cell == Vector2i(-1, -1):
+		var any := false
+		for level in spec.layer_count():
+			var door_cell := _find_doorway_cell(spec, level, dir)
+			if door_cell == Vector2i(-1, -1):
+				continue
+			any = true
+			var door := packed.instantiate() as Door
+			if door == null:
+				continue
+			door.name = "Door_%s_L%d" % [ModuleContract.dir_name(dir), level]
+			var pos := spec.cell_center(level, door_cell.x, door_cell.y)
+			var y := float(level) * spec.layer_height
+			match dir:
+				ModuleContract.Dir.E:
+					door.position = Vector3(float(spec.width) * spec.cell_size, y, pos.z)
+					door.rotation.y = -PI * 0.5
+					door.open_angle_deg = -95.0
+				ModuleContract.Dir.S:
+					door.position = Vector3(pos.x, y, float(spec.depth) * spec.cell_size)
+					door.rotation.y = PI
+					door.open_angle_deg = -95.0
+				ModuleContract.Dir.W:
+					door.position = Vector3(0.0, y, pos.z)
+					door.rotation.y = PI * 0.5
+					door.open_angle_deg = -95.0
+				ModuleContract.Dir.N:
+					door.position = Vector3(pos.x, y, 0.0)
+					door.rotation.y = 0.0
+					door.open_angle_deg = -95.0
+			room.add_child(door)
+		if not any:
 			push_error("No doorway cell for open %s in %s" % [ModuleContract.dir_name(dir), spec.id])
-			continue
-		var door := packed.instantiate() as Door
-		if door == null:
-			continue
-		door.name = "Door_%s" % ModuleContract.dir_name(dir)
-		var pos := spec.cell_center(0, door_cell.x, door_cell.y)
-		match dir:
-			ModuleContract.Dir.E:
-				door.position = Vector3(float(spec.width) * spec.cell_size, 0.0, pos.z)
-				door.rotation.y = -PI * 0.5
-				door.open_angle_deg = -95.0
-			ModuleContract.Dir.S:
-				door.position = Vector3(pos.x, 0.0, float(spec.depth) * spec.cell_size)
-				door.rotation.y = PI
-				door.open_angle_deg = -95.0
-			ModuleContract.Dir.W:
-				door.position = Vector3(0.0, 0.0, pos.z)
-				door.rotation.y = PI * 0.5
-				door.open_angle_deg = -95.0
-			ModuleContract.Dir.N:
-				door.position = Vector3(pos.x, 0.0, 0.0)
-				door.rotation.y = 0.0
-				door.open_angle_deg = -95.0
-		room.add_child(door)
 
 
-static func _find_doorway_cell(spec: RoomSpec, dir: ModuleContract.Dir) -> Vector2i:
-	## Prefer a single walkable edge cell nearest the edge midpoint.
-	var candidates := _edge_walkable_cells(spec, dir)
+static func _primary_door_level(spec: RoomSpec, dir: ModuleContract.Dir) -> int:
+	## Highest local layer with an opening in `dir` (balcony exits beat ground).
+	var best := 0
+	var found := false
+	for level in spec.layer_count():
+		if not _edge_walkable_cells(spec, level, dir).is_empty():
+			best = level
+			found = true
+	return best if found else 0
+
+
+static func _find_doorway_cell(spec: RoomSpec, level: int, dir: ModuleContract.Dir) -> Vector2i:
+	var candidates := _edge_walkable_cells(spec, level, dir)
 	if candidates.is_empty():
 		return Vector2i(-1, -1)
-	var mid := Vector2(float(spec.width) * 0.5, float(spec.depth) * 0.5)
-	var best := candidates[0]
-	var best_d := INF
-	for c in candidates:
-		var d := Vector2(float(c.x) + 0.5, float(c.y) + 0.5).distance_squared_to(mid)
-		if d < best_d:
-			best_d = d
-			best = c
-	return best
+	return _pick_doorway_cell(spec, candidates)
 
 
 static func _add_lights(room: RoomModule, spec: RoomSpec) -> void:

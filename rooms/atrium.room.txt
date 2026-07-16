@@ -5,42 +5,42 @@
 
 layer 0
 ############
-#XXXXXXXXXX#
-#XXXXXXXXXX#
-#XXXXXXXXXX#
-#XXXXXSXXXX#
-#XDXXXSXXXXX
-#XDXXXSXXXX#
-#XDXXXSXXXX#
-#XDXXXSXXXX#
-#XXXXXXXXXX#
-#XXXXXXXXXX#
+#..........#
+#..........#
+#..........#
+#.....S....#
+#.D...S.....
+#.D...S....#
+#.D...S....#
+#.D...S....#
+#..........#
+#....P.....#
 ############
 
 layer 1
 ############
-#XXXXXXXXXX#
-#X........X#
-#XS.......X#
-#XS.......X#
-#XS.......X#
-#XS.......X#
-#XS.......X#
-#XXXXX.XXXX#
-#XXXXX.XXXX#
-#XXXXXXXXXX#
+#..........#
+#XXX......X#
+#.S       .#
+#.S       .#
+#.S       .#
+#.S       .#
+#.S       .#
+#..... ....#
+#..........#
+#..........#
 ############
 
 layer 2
 ############
-#XXXXPXXXXX#
-#X........X#
-#X........X#
-#X........X#
-#X........X#
-#X........X#
-#X........X#
-#X........X#
-#XXXXXXXXXX#
-#XXXXXXXXXX#
+#..........#
+#..       .#
+#X        .#
+#X        .#
+#X        .#
+#X        .#
+#X        .#
+#.        .#
+#.        .#
+#..........#
 ############

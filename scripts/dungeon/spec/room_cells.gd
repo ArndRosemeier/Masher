@@ -20,9 +20,9 @@ static func to_char(kind: Kind) -> String:
 		Kind.WALL:
 			return "#"
 		Kind.EMPTY:
-			return "."
+			return " "
 		Kind.FLOOR:
-			return "X"
+			return "."
 		Kind.STAIR:
 			return "S"
 		Kind.DOWN_STAIR:
@@ -42,9 +42,10 @@ static func from_char(ch: String) -> Kind:
 	match ch:
 		"#":
 			return Kind.WALL
-		".":
+		" ":
 			return Kind.EMPTY
-		"X", "+":
+		".", "X", "+":
+			## `.` is floor. `X`/`+` remain accepted aliases for older room files.
 			return Kind.FLOOR
 		"S":
 			return Kind.STAIR

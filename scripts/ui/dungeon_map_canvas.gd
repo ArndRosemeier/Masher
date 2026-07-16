@@ -201,10 +201,10 @@ func _char_color(ch: String, is_player: bool, on_floor: bool) -> Color:
 			return Color(0.95, 0.75, 0.4)
 		"+":
 			return Color(0.95, 0.82, 0.35)
-		"X":
-			return Color(0.65, 0.7, 0.55)
 		".":
-			return Color(0.45, 0.55, 0.42)
+			return Color(0.55, 0.62, 0.5)
+		" ":
+			return Color(0.14, 0.16, 0.18, 0.4)
 	return Color(0.75, 0.78, 0.72)
 
 
@@ -219,16 +219,20 @@ func _cell_center_content(floor_index: int, world_cell: Vector2i) -> Vector2:
 
 func _draw_vertical_links() -> void:
 	for link in _model.vertical_links:
-		if link.world_cells.is_empty():
+		## Unpaired links are lies (void endpoints) — do not draw them.
+		if not link.paired:
 			continue
 		if not _panel_origins.has(link.from_floor) or not _panel_origins.has(link.to_floor):
 			continue
-		var mid := link.world_cells[link.world_cells.size() / 2]
-		var a := _cell_center_content(link.from_floor, mid)
-		var b := _cell_center_content(link.to_floor, mid)
-		var col := Color(0.35, 0.85, 0.95, 0.85) if link.kind == "up" else Color(0.95, 0.55, 0.35, 0.9)
-		if not link.paired:
-			col.a = 0.45
+		var from_cell := link.from_anchor
+		var to_cell := link.to_anchor
+		if from_cell.x == -99999:
+			from_cell = link.world_cells[link.world_cells.size() / 2]
+		if to_cell.x == -99999:
+			to_cell = from_cell
+		var a := _cell_center_content(link.from_floor, from_cell)
+		var b := _cell_center_content(link.to_floor, to_cell)
+		var col := Color(0.35, 0.85, 0.95, 0.9) if link.kind == "up" else Color(0.95, 0.55, 0.35, 0.9)
 		var ctrl := Vector2((a.x + b.x) * 0.5 + 18.0, (a.y + b.y) * 0.5)
 		_draw_bezier(a, ctrl, b, col, 2.5)
 		var label_pos := ctrl + Vector2(6.0, -2.0)

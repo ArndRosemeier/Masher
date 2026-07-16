@@ -7,15 +7,11 @@ First-person real-time dungeon crawler POC (Godot 4.6).
 - **Engine:** Godot 4.6 (Forward+)
 - **Art:** KayKit Dungeon Remastered + Skeletons (CC0)
 - **Audio:** Kenney impact / RPG / UI packs (CC0), plus a short generated ambient loop
-- **Layout:** Fixed modular dungeon for the POC; room-graph procgen ready (`LevelMode.GENERATED`)
+- **Layout:** Multilayer hybrid procgen inside a 3D harness (creation UI on boot)
 
 ## Run
 
-Open `C:\Projekte\Masher` in Godot 4.6, or:
-
-```powershell
-& "C:\Projekte\InfiniWorld\tools\godot\Godot_v4.6-stable_win64.exe" --path "C:\Projekte\Masher"
-```
+Open `C:\Projekte\Masher` in Godot 4.6, or use `start.bat`.
 
 ### Controls
 
@@ -23,18 +19,13 @@ Open `C:\Projekte\Masher` in Godot 4.6, or:
 - **Mouse** look
 - **LMB** melee attack
 - **Esc** free / capture mouse
-- **R** restart after death or clearing the exit
+- **F1** dungeon ASCII map
+- **R** return to create screen after death or clearing the exit
 
-## POC loop
+## Loop
 
-Start room → corridors → combat room (skeletons) → exit (green orb). Die or reach the exit, then press **R**.
-
-## Procgen switch
-
-On `Main` → `RunManager`, set `level_mode`:
-
-- `Fixed` (default POC layout)
-- `Generated` (seedable `RoomGraphGenerator` using the same modules)
+Create screen (harness meters / presets / seed) → **Generate** → explore multilayer dungeon → exit orb or death → **R** back to create.
+Dev button **Fixed POC** still loads the hand-placed atrium layout.
 
 ## Module contract
 
@@ -54,18 +45,18 @@ Pipeline: parse → validate → bake (`scripts/dungeon/spec/`).
 
 layer 0
 ####
-#PX.
-#XS.
+#P. 
+#.S 
 ####
 
 layer 1
 ####
-#XX#
-#X.#
+#..#
+#. #
 ####
 ```
 
-Legend: `#` wall · `.` void · `X`/`+` floor · `S` stair · `P` spawn · `E` exit · `M` enemy
+Legend: `#` wall · `.` floor · space void · `S` stair · `P` spawn · `E` exit · `M` enemy
 
 Validate all rooms headless:
 

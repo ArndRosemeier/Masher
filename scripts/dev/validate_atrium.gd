@@ -2,9 +2,14 @@ extends SceneTree
 
 
 func _initialize() -> void:
+	call_deferred("_go")
+
+
+func _go() -> void:
 	var dungeon := FixedLevelSource.new().build_dungeon()
 	root.add_child(dungeon)
-	await create_timer(0.05).timeout
+	await process_frame
+	await process_frame
 
 	var spawns := get_nodes_in_group(ModuleContract.GROUP_PLAYER_SPAWN)
 	var exits := get_nodes_in_group(ModuleContract.GROUP_EXIT)
@@ -13,7 +18,8 @@ func _initialize() -> void:
 	print("EXITS ", exits.size())
 	print("DOORS ", doors.size())
 	assert(spawns.size() == 1)
-	assert((spawns[0] as Node3D).global_position.y > 7.0)
+	## Spawn is on atrium ground floor so the first stairs climb UP.
+	assert((spawns[0] as Node3D).global_position.y < 2.0)
 	assert(exits.size() == 1)
 	assert(doors.size() >= 1)
 	print("ATRIUM_OK")

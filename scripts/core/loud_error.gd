@@ -13,6 +13,17 @@ static func report(context: String, message: String) -> void:
 		OS.alert(full, "Masher error")
 
 
+static func fatal(context: String, message: String, tree: SceneTree = null) -> void:
+	## Report loudly, then quit so we never continue in a half-broken boot state.
+	report(context, message)
+	if tree != null:
+		tree.quit(1)
+		return
+	var main := Engine.get_main_loop() as SceneTree
+	if main != null:
+		main.quit(1)
+
+
 static func _can_alert() -> bool:
 	if DisplayServer.get_name() == "headless":
 		return false

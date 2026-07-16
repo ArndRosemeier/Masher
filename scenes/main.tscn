@@ -23,7 +23,7 @@ fog_light_color = Color(0.08, 0.06, 0.05, 1)
 fog_density = 0.035
 fog_aerial_perspective = 0.2
 adjustment_enabled = true
-adjustment_brightness = 0.95
+adjustment_brightness = 1.08
 adjustment_contrast = 1.08
 adjustment_saturation = 0.92
 
@@ -46,7 +46,5 @@ shadow_enabled = false
 
 [node name="RunManager" type="Node" parent="."]
 script = ExtResource("1_run")
-level_mode = 0
-generated_seed = 42
 player_scene = ExtResource("3_player")
 enemy_scene = ExtResource("4_enemy")

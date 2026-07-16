@@ -5,12 +5,13 @@
 
 layer 0
 ####################
-#XXXXXXXXXXXXXXXXXX#
-#XXXXXXXXXXXXXXXXXX#
-#XXXXXXXXXXXXXXXXXX#
-#XXXXXXXXXXXXXXXXXX#
-#X^XXXXXXXXXXXXXXXX#
-#X^XXXXXXXXXXXXXXXX#
-#X^XXXXXXXXXXXXXXXX#
-#X^XXXXXXXXXXXXXXXX#
+#..................#
+#..................#
+#..................#
+#..................#
+#.^................#
+#.^................#
+#.^................#
+#.^................#
 ####################
+

@@ -90,17 +90,19 @@ static func _component_to_run(
 		end_a = Vector2i(min_x, min_z)
 		end_b = Vector2i(min_x, max_z)
 
-	var score_a := _floor_touch_score(spec, level, end_a)
-	var score_b := _floor_touch_score(spec, level, end_b)
-	# Ascending: bottom has more same-layer floor. Descending: top (approach) has more floor.
-	var bottom: Vector2i
-	var top: Vector2i
-	if ascending:
-		bottom = end_a if score_a >= score_b else end_b
-		top = end_b if bottom == end_a else end_a
-	else:
-		top = end_a if score_a >= score_b else end_b
-		bottom = end_b if top == end_a else end_a
+	# Score both orientations by where the actual landings are: the entry needs
+	# floor on this layer at the bottom, the exit needs floor on the layer above
+	# at the top (ascending) or an approach floor at the top (descending).
+	var score_ab := _orientation_score(spec, level, end_a, end_b, ascending)
+	var score_ba := _orientation_score(spec, level, end_b, end_a, ascending)
+	# Equal scores mean both orientations are equally valid (symmetric run) or
+	# equally broken — the validators reject the latter with a loud error.
+	# Tie-break deterministically: ascending climbs from the min end; descending
+	# descends toward the min end (the shaft landing in the room below usually
+	# sits at the low-coordinate side, e.g. atrium → undercroft).
+	var a_is_bottom := score_ab > score_ba or (score_ab == score_ba and ascending)
+	var bottom := end_a if a_is_bottom else end_b
+	var top := end_b if a_is_bottom else end_a
 
 	if along_x:
 		run.dir = ModuleContract.Dir.E if top.x > bottom.x else ModuleContract.Dir.W
@@ -123,15 +125,30 @@ static func _component_to_run(
 	return run
 
 
-static func _floor_touch_score(spec: RoomSpec, level: int, cell: Vector2i) -> int:
-	var score := 0
-	for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-		var n: Vector2i = cell + d
-		if not spec.in_bounds(n.x, n.y):
-			continue
-		var kind: int = spec.get_cell(level, n.x, n.y)
-		if RoomCells.is_floor_surface(kind):
-			score += 2
-		elif RoomCells.is_walkable(kind):
+static func _orientation_score(
+	spec: RoomSpec,
+	level: int,
+	bottom: Vector2i,
+	top: Vector2i,
+	ascending: bool
+) -> int:
+	## Ascending: entry floor on this layer straight before the bottom, exit floor
+	## on the layer above straight past the top. Descending: approach floor on
+	## this layer straight past the top (the bottom drops into the room below).
+	var step := (top - bottom).sign()
+	if ascending:
+		var score := 0
+		if _is_floor_at(spec, level, bottom - step):
 			score += 1
-	return score
+		if _is_floor_at(spec, level + 1, top + step):
+			score += 2
+		return score
+	return 1 if _is_floor_at(spec, level, top + step) else 0
+
+
+static func _is_floor_at(spec: RoomSpec, level: int, cell: Vector2i) -> bool:
+	if level >= spec.layer_count():
+		return false
+	if not spec.in_bounds(cell.x, cell.y):
+		return false
+	return RoomCells.is_floor_surface(spec.get_cell(level, cell.x, cell.y))

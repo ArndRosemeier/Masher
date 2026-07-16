@@ -1,24 +1,24 @@
 # id: stair_test
 # cell: 2.0
 # layer_height: 4.0
-# open: E
+# open: W,E
 
 layer 0
 ########
-#PXXXXX#
-#XXXXXX#
-#XXXXXS#
-#XXXXXS#
-#XXXXXS#
-#XXXXXXX
+#P.....#
+.......#
+#.....S#
+#.....S#
+#.....S#
+#.......
 ########
 
 layer 1
 ########
+#      #
 #......#
-#XXXXXX#
-#XXXXX.#
-#XXXXX.#
-#XXXXX.#
-#XXXXXX#
+#..... #
+#..... #
+#..... #
+#......#
 ########

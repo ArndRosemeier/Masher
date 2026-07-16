@@ -82,28 +82,23 @@ static func _validate_up_stair(spec: RoomSpec, run: StairRun) -> PackedStringArr
 			errors.append("upper floor blocks stair column at %s layer %d" % [c, run.level + 1])
 		if upper == RoomCells.Kind.WALL:
 			errors.append("wall blocks stair column at %s" % c)
+	## The ramp is climbed along the run axis: the exit landing must be straight
+	## past the top on the layer above, the entry straight before the bottom.
 	var top := run.top()
-	var touched := false
-	for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-		var n: Vector2i = top + d
-		if not spec.in_bounds(n.x, n.y):
-			continue
-		if RoomCells.is_floor_surface(spec.get_cell(run.level + 1, n.x, n.y)):
-			touched = true
-			break
-	if not touched:
-		errors.append("stair top %s layer %d has no upper landing floor" % [top, run.level + 1])
 	var bottom := run.bottom()
-	var bottom_ok := false
-	for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-		var n2: Vector2i = bottom + d
-		if not spec.in_bounds(n2.x, n2.y):
-			continue
-		if RoomCells.is_floor_surface(spec.get_cell(run.level, n2.x, n2.y)):
-			bottom_ok = true
-			break
-	if not bottom_ok:
-		errors.append("stair bottom %s layer %d has no lower floor access" % [bottom, run.level])
+	var step := (top - bottom).sign()
+	var exit_cell := top + step
+	if not _is_floor_at(spec, run.level + 1, exit_cell):
+		errors.append(
+			"stair top %s layer %d has no upper landing floor at %s (run climbs %s)"
+			% [top, run.level + 1, exit_cell, ModuleContract.dir_name(run.dir)]
+		)
+	var entry_cell := bottom - step
+	if not _is_floor_at(spec, run.level, entry_cell):
+		errors.append(
+			"stair bottom %s layer %d has no lower floor access at %s"
+			% [bottom, run.level, entry_cell]
+		)
 	return errors
 
 
@@ -111,17 +106,21 @@ static func _validate_down_stair(spec: RoomSpec, run: StairRun) -> PackedStringA
 	## Down stairs are level connectors: shaft opens this layer; landing is the room below.
 	var errors: PackedStringArray = []
 	var top := run.top()
-	var top_ok := false
-	for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-		var n: Vector2i = top + d
-		if not spec.in_bounds(n.x, n.y):
-			continue
-		if RoomCells.is_floor_surface(spec.get_cell(run.level, n.x, n.y)):
-			top_ok = true
-			break
-	if not top_ok:
-		errors.append("down-stair top %s layer %d has no approach floor" % [top, run.level])
+	var step := (top - run.bottom()).sign()
+	var approach := top + step
+	if not _is_floor_at(spec, run.level, approach):
+		errors.append(
+			"down-stair top %s layer %d has no approach floor at %s" % [top, run.level, approach]
+		)
 	return errors
+
+
+static func _is_floor_at(spec: RoomSpec, level: int, cell: Vector2i) -> bool:
+	if level >= spec.layer_count():
+		return false
+	if not spec.in_bounds(cell.x, cell.y):
+		return false
+	return RoomCells.is_floor_surface(spec.get_cell(level, cell.x, cell.y))
 
 
 static func _validate_openings(spec: RoomSpec) -> PackedStringArray:
@@ -134,25 +133,30 @@ static func _validate_openings(spec: RoomSpec) -> PackedStringArray:
 				)
 			continue
 		var found := false
-		match dir:
-			ModuleContract.Dir.N:
-				for x in spec.width:
-					if _edge_open(spec, x, 0):
-						found = true
-			ModuleContract.Dir.S:
-				for x in spec.width:
-					if _edge_open(spec, x, spec.depth - 1):
-						found = true
-			ModuleContract.Dir.W:
-				for z in spec.depth:
-					if _edge_open(spec, 0, z):
-						found = true
-			ModuleContract.Dir.E:
-				for z in spec.depth:
-					if _edge_open(spec, spec.width - 1, z):
-						found = true
+		for level in spec.layer_count():
+			match dir:
+				ModuleContract.Dir.N:
+					for x in spec.width:
+						if _edge_open(spec, level, x, 0):
+							found = true
+				ModuleContract.Dir.S:
+					for x in spec.width:
+						if _edge_open(spec, level, x, spec.depth - 1):
+							found = true
+				ModuleContract.Dir.W:
+					for z in spec.depth:
+						if _edge_open(spec, level, 0, z):
+							found = true
+				ModuleContract.Dir.E:
+					for z in spec.depth:
+						if _edge_open(spec, level, spec.width - 1, z):
+							found = true
+			if found:
+				break
 		if not found:
-			errors.append("open %s has no walkable edge gap on layer 0" % ModuleContract.dir_name(dir))
+			errors.append(
+				"open %s has no walkable edge gap on any layer" % ModuleContract.dir_name(dir)
+			)
 	return errors
 
 
@@ -167,9 +171,9 @@ static func _has_vertical_shaft(spec: RoomSpec, dir: ModuleContract.Dir) -> bool
 	return false
 
 
-static func _edge_open(spec: RoomSpec, x: int, z: int) -> bool:
+static func _edge_open(spec: RoomSpec, level: int, x: int, z: int) -> bool:
 	## Doorways must be walkable floor (not void) so players don't fall through.
-	return RoomCells.is_walkable(spec.get_cell(0, x, z))
+	return RoomCells.is_walkable(spec.get_cell(level, x, z))
 
 
 static func _validate_reachability(spec: RoomSpec, require_player: bool, require_exit: bool) -> PackedStringArray:
@@ -244,13 +248,12 @@ static func _flood_walkable(spec: RoomSpec, start: Vector3i, runs: Array[StairRu
 				if run.ascending:
 					var top := run.top()
 					if x == top.x and z == top.y:
-						for d2 in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
-							var ux: int = top.x + d2.x
-							var uz: int = top.y + d2.y
-							if not spec.in_bounds(ux, uz):
-								continue
-							if RoomCells.is_floor_surface(spec.get_cell(level + 1, ux, uz)):
-								stack.append(Vector3i(level + 1, ux, uz))
+						var exit_cell: Vector2i = top + (top - run.bottom()).sign()
+						if (
+							spec.in_bounds(exit_cell.x, exit_cell.y)
+							and RoomCells.is_floor_surface(spec.get_cell(level + 1, exit_cell.x, exit_cell.y))
+						):
+							stack.append(Vector3i(level + 1, exit_cell.x, exit_cell.y))
 		if RoomCells.is_floor_surface(kind):
 			for run in runs:
 				if not run.ascending:
@@ -258,6 +261,7 @@ static func _flood_walkable(spec: RoomSpec, start: Vector3i, runs: Array[StairRu
 				if run.level + 1 != level:
 					continue
 				var top2 := run.top()
-				if absi(x - top2.x) + absi(z - top2.y) == 1:
+				var exit2: Vector2i = top2 + (top2 - run.bottom()).sign()
+				if exit2.x == x and exit2.y == z:
 					stack.append(Vector3i(run.level, top2.x, top2.y))
 	return reached

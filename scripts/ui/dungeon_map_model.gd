@@ -45,6 +45,9 @@ class VerticalLink:
 	var to_floor: int = 0
 	var module_id: String = ""
 	var world_cells: Array[Vector2i] = []
+	## Preferred draw anchors (stair tread → landing), set during pairing.
+	var from_anchor: Vector2i = Vector2i(-99999, -99999)
+	var to_anchor: Vector2i = Vector2i(-99999, -99999)
 	var label: String = ""
 	var paired: bool = false
 
@@ -132,10 +135,15 @@ static func build(module_nodes: Array) -> DungeonMapModel:
 				link.kind = "up"
 				link.to_floor = link.from_floor + 1
 				link.label = "%s  S^  F%d->F%d" % [link.module_id, link.from_floor, link.to_floor]
+				## Approach at bottom, emerge at top.
+				link.from_anchor = Vector2i(origin.x + run.bottom().x, origin.y + run.bottom().y)
+				link.to_anchor = Vector2i(origin.x + run.top().x, origin.y + run.top().y)
 			else:
 				link.kind = "down"
 				link.to_floor = link.from_floor - 1
 				link.label = "%s  Dv  F%d->F%d" % [link.module_id, link.from_floor, link.to_floor]
+				link.from_anchor = Vector2i(origin.x + run.top().x, origin.y + run.top().y)
+				link.to_anchor = Vector2i(origin.x + run.bottom().x, origin.y + run.bottom().y)
 			for c in run.cells:
 				link.world_cells.append(Vector2i(origin.x + c.x, origin.y + c.y))
 			model.vertical_links.append(link)
@@ -143,20 +151,23 @@ static func build(module_nodes: Array) -> DungeonMapModel:
 		for dir in spec.open_dirs:
 			if ModuleContract.is_vertical(dir):
 				continue
-			var door_local := _find_doorway_cell(spec, dir)
-			if door_local == Vector2i(-1, -1):
-				continue
-			var door := DoorLink.new()
-			door.dir = dir
-			door.floor_index = room.vertical_level
-			door.module_id = ref.module_id
-			door.world_cell = Vector2i(origin.x + door_local.x, origin.y + door_local.y)
-			door.label = "%s  door %s" % [ref.module_id, ModuleContract.dir_name(dir)]
-			model.door_links.append(door)
-			## Map-only glyph: doorways are walkable edge cells in room ASCII; show as `+`.
-			var door_layer: FloorLayer = model.floors.get(door.floor_index) as FloorLayer
-			if door_layer != null:
-				_stamp(door_layer, door.world_cell, "+", ref.module_id)
+			for local_level in spec.layer_count():
+				var door_local := _find_doorway_cell(spec, local_level, dir)
+				if door_local == Vector2i(-1, -1):
+					continue
+				var door := DoorLink.new()
+				door.dir = dir
+				door.floor_index = room.vertical_level + local_level
+				door.module_id = ref.module_id
+				door.world_cell = Vector2i(origin.x + door_local.x, origin.y + door_local.y)
+				door.label = "%s  door %s L%d" % [
+					ref.module_id, ModuleContract.dir_name(dir), door.floor_index
+				]
+				model.door_links.append(door)
+				## Map-only glyph: doorways are walkable edge cells in room ASCII; show as `+`.
+				var door_layer: FloorLayer = model.floors.get(door.floor_index) as FloorLayer
+				if door_layer != null:
+					_stamp(door_layer, door.world_cell, "+", ref.module_id)
 
 	_pair_vertical_links(model)
 	_pair_door_links(model)
@@ -218,10 +229,10 @@ static func _char_priority(ch: String) -> int:
 			return 3
 		"#":
 			return 2
-		"X":
-			return 1
 		".":
-			return 0
+			return 1 ## floor
+		" ":
+			return 0 ## void
 	return 0
 
 
@@ -230,20 +241,71 @@ static func _pair_vertical_links(model: DungeonMapModel) -> void:
 		var dest: FloorLayer = model.floors.get(link.to_floor) as FloorLayer
 		if dest == null:
 			link.label += "  [no floor]"
+			link.paired = false
 			continue
-		var paired := 0
-		for c in link.world_cells:
-			var ch: String = dest.cells.get(c, "")
-			if link.kind == "down" and ch == "^":
-				paired += 1
-			elif link.kind == "up" and (ch == "X" or ch == "+" or ch == "P" or ch == "." or ch == "S"):
-				paired += 1
-		link.paired = paired > 0
 		if link.kind == "down":
-			link.label += "  <-> ^" if link.paired else "  [unpaired]"
+			var shaft := _find_neighbor_char(dest, link.to_anchor, "^")
+			if shaft != Vector2i(-99999, -99999):
+				link.to_anchor = shaft
+				link.paired = true
+				link.label += "  <-> ^"
+			else:
+				link.paired = false
+				link.label += "  [unpaired]"
+		else:
+			## Up stairs: column above is void; land on adjacent floor on the upper panel.
+			var land := _find_landing(dest, link.to_anchor)
+			if land != Vector2i(-99999, -99999):
+				link.to_anchor = land
+				link.paired = true
+			else:
+				link.paired = false
+				link.label += "  [no landing]"
+
+
+static func _find_neighbor_char(layer: FloorLayer, center: Vector2i, ch: String) -> Vector2i:
+	if layer.get_char(center) == ch:
+		return center
+	for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+		var n: Vector2i = center + d
+		if layer.get_char(n) == ch:
+			return n
+	return Vector2i(-99999, -99999)
+
+
+static func _find_landing(layer: FloorLayer, shaft_cell: Vector2i) -> Vector2i:
+	## Prefer walkable floor next to the stair column (not void/wall).
+	var best := Vector2i(-99999, -99999)
+	var best_score := -1
+	for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1), Vector2i.ZERO]:
+		var n: Vector2i = shaft_cell + d
+		if not layer.has_cell(n):
+			continue
+		var ch := layer.get_char(n)
+		var score := 0
+		match ch:
+			".", "X", "+":
+				score = 3
+			"P", "E", "M":
+				score = 4
+			"S":
+				score = 1
+			"^":
+				score = 2
+			_:
+				score = 0
+		if score > best_score:
+			best_score = score
+			best = n
+	if best_score <= 0:
+		return Vector2i(-99999, -99999)
+	return best
 
 
 static func _pair_door_links(model: DungeonMapModel) -> void:
+	## Multi-cell modules pick doorway cells at their own midpoints, so peers on a
+	## shared edge can be several cells apart on the tangent axis. Pair by facing
+	## + overlap on that edge, not by a tiny midpoint distance.
 	for door in model.door_links:
 		var opp := ModuleContract.opposite(door.dir)
 		var best: DoorLink = null
@@ -255,11 +317,13 @@ static func _pair_door_links(model: DungeonMapModel) -> void:
 				continue
 			if other.dir != opp:
 				continue
+			if not _doors_face_across_gap(door, other):
+				continue
 			var d := _door_pair_distance(door, other)
 			if d < best_d:
 				best_d = d
 				best = other
-		if best != null and best_d <= 2.5:
+		if best != null:
 			door.paired = true
 			door.peer_module_id = best.module_id
 			door.peer_world_cell = best.world_cell
@@ -283,24 +347,40 @@ static func _door_pair_distance(a: DoorLink, b: DoorLink) -> float:
 	return Vector2(ax, az).distance_to(Vector2(bx, bz))
 
 
-static func _find_doorway_cell(spec: RoomSpec, dir: ModuleContract.Dir) -> Vector2i:
+static func _doors_face_across_gap(a: DoorLink, b: DoorLink) -> bool:
+	## True when the two doorway cells sit on opposite faces of the same gap
+	## (one cell apart on the normal, overlapping on the tangent within a room).
+	const TANGENT_SLACK := 4 ## ASCII cells; covers 1×1 vs 2×2 midpoint mismatch
+	match a.dir:
+		ModuleContract.Dir.E:
+			return b.world_cell.x == a.world_cell.x + 1 and absi(a.world_cell.y - b.world_cell.y) <= TANGENT_SLACK
+		ModuleContract.Dir.W:
+			return b.world_cell.x == a.world_cell.x - 1 and absi(a.world_cell.y - b.world_cell.y) <= TANGENT_SLACK
+		ModuleContract.Dir.S:
+			return b.world_cell.y == a.world_cell.y + 1 and absi(a.world_cell.x - b.world_cell.x) <= TANGENT_SLACK
+		ModuleContract.Dir.N:
+			return b.world_cell.y == a.world_cell.y - 1 and absi(a.world_cell.x - b.world_cell.x) <= TANGENT_SLACK
+	return false
+
+
+static func _find_doorway_cell(spec: RoomSpec, level: int, dir: ModuleContract.Dir) -> Vector2i:
 	var candidates: Array[Vector2i] = []
 	match dir:
 		ModuleContract.Dir.E:
 			for z in spec.depth:
-				if RoomCells.is_walkable(spec.get_cell(0, spec.width - 1, z)):
+				if RoomCells.is_walkable(spec.get_cell(level, spec.width - 1, z)):
 					candidates.append(Vector2i(spec.width - 1, z))
 		ModuleContract.Dir.W:
 			for z in spec.depth:
-				if RoomCells.is_walkable(spec.get_cell(0, 0, z)):
+				if RoomCells.is_walkable(spec.get_cell(level, 0, z)):
 					candidates.append(Vector2i(0, z))
 		ModuleContract.Dir.S:
 			for x in spec.width:
-				if RoomCells.is_walkable(spec.get_cell(0, x, spec.depth - 1)):
+				if RoomCells.is_walkable(spec.get_cell(level, x, spec.depth - 1)):
 					candidates.append(Vector2i(x, spec.depth - 1))
 		ModuleContract.Dir.N:
 			for x in spec.width:
-				if RoomCells.is_walkable(spec.get_cell(0, x, 0)):
+				if RoomCells.is_walkable(spec.get_cell(level, x, 0)):
 					candidates.append(Vector2i(x, 0))
 	if candidates.is_empty():
 		return Vector2i(-1, -1)

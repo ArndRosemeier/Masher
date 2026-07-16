@@ -5,11 +5,17 @@ set "PROJECT_DIR=%~dp0"
 if "%PROJECT_DIR:~-1%"=="\" set "PROJECT_DIR=%PROJECT_DIR:~0,-1%"
 
 rem Prefer the *console* build so SCRIPT ERROR / push_error are visible.
+rem Non-console godot.exe swallows script errors — avoid it when a console build exists.
 set "GODOT="
 if exist "%PROJECT_DIR%\tools\godot_console.exe" set "GODOT=%PROJECT_DIR%\tools\godot_console.exe"
 if not defined GODOT if exist "C:\Projekte\InfiniWorld\tools\godot\Godot_v4.6-stable_win64_console.exe" set "GODOT=C:\Projekte\InfiniWorld\tools\godot\Godot_v4.6-stable_win64_console.exe"
-if not defined GODOT if exist "%PROJECT_DIR%\tools\godot.exe" set "GODOT=%PROJECT_DIR%\tools\godot.exe"
-if not defined GODOT if exist "C:\Projekte\InfiniWorld\tools\godot\Godot_v4.6-stable_win64.exe" set "GODOT=C:\Projekte\InfiniWorld\tools\godot\Godot_v4.6-stable_win64.exe"
+if not defined GODOT if exist "%PROJECT_DIR%\tools\Godot_v4.6-stable_win64_console.exe" set "GODOT=%PROJECT_DIR%\tools\Godot_v4.6-stable_win64_console.exe"
+if not defined GODOT (
+    echo WARNING: No console Godot found — script errors may be invisible.
+    echo Place Godot_*_console.exe in tools\ or InfiniWorld\tools\godot\
+    if exist "%PROJECT_DIR%\tools\godot.exe" set "GODOT=%PROJECT_DIR%\tools\godot.exe"
+    if not defined GODOT if exist "C:\Projekte\InfiniWorld\tools\godot\Godot_v4.6-stable_win64.exe" set "GODOT=C:\Projekte\InfiniWorld\tools\godot\Godot_v4.6-stable_win64.exe"
+)
 
 if not defined GODOT (
     echo Could not find Godot. Place godot.exe / godot_console.exe in tools\ or update start.bat.

@@ -92,17 +92,40 @@ func set_interact_hint(text: String) -> void:
 		interact_hint.visible = true
 
 
+func show_menu() -> void:
+	banner.visible = false
+	hint.text = "Set harness size · Generate a multilayer run"
+	hint.visible = true
+	set_interact_hint("")
+	health_bar.visible = false
+	health_label.visible = false
+
+
 func show_playing() -> void:
 	banner.visible = false
+	health_bar.visible = true
+	health_label.visible = true
 	hint.text = "Mouse look · LMB attack · Space jump · E doors · F1 map · Esc free cursor"
 	hint.visible = true
 	set_interact_hint("")
 
 
+func set_run_info(seed_value: int, module_count: int, fixed_poc: bool = false) -> void:
+	## Surfaced so a generated run is visibly distinct from Fixed POC.
+	if fixed_poc:
+		hint.text = "Fixed POC · %d modules · F1 map · Esc free cursor" % module_count
+	else:
+		hint.text = (
+			"Seed %d · %d modules · Mouse look · LMB · Space · E · F1 map"
+			% [seed_value, module_count]
+		)
+	hint.visible = true
+
+
 func show_dead() -> void:
 	banner.text = "You died"
 	banner.visible = true
-	hint.text = "Press R to restart the run"
+	hint.text = "Press R to return to create"
 	hint.visible = true
 	set_interact_hint("")
 
@@ -110,7 +133,7 @@ func show_dead() -> void:
 func show_won() -> void:
 	banner.text = "Dungeon cleared"
 	banner.visible = true
-	hint.text = "Press R to restart the run"
+	hint.text = "Press R to return to create"
 	hint.visible = true
 	set_interact_hint("")
 
@@ -218,7 +241,7 @@ func _legend_text(model) -> String:
 		if door.paired:
 			paired_doors += 1
 	var parts: PackedStringArray = [
-		"# wall  . empty  X floor  + door  S up-stair  D down-stair  ^ shaft  @ you",
+		"# wall  . floor  (space) void  + door  S up-stair  D down-stair  ^ shaft  @ you",
 		"curve overlay = vertical link between stacked floors (S^ / Dv)",
 		"vertical links: %d   ·   door cells (+): %d (%d paired)" % [
 			model.vertical_links.size(),

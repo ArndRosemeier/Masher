@@ -4,8 +4,8 @@ extends LevelSource
 ##
 ## Layout:
 ##   undercroft 20x10 at vertical level -1 under the atrium (U/D shaft)
-##   atrium 3x3 at (0,0) level 0 — multi-layer start with down-stairs
-##   then east chain on level 0:
+##   atrium 3x3 at (0,0) level 0 — multi-layer start (spawn on ground, stairs up)
+##   then east chain on level 0 (same doorway floor as atrium's east gap):
 ##   (3,1) corridor --E-- (4,1) combat --E-- (5,1) corridor --E-- (6,1) exit
 
 

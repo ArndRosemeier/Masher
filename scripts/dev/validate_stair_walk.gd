@@ -37,7 +37,7 @@ func _initialize() -> void:
 func _go() -> void:
 	var cases: Array[WalkCase] = [
 		WalkCase.new(
-			"stair_test L0 up", Vector3(13.0, 0.9, 5.0), Vector3(0.0, 0.0, 1.0), 300, 0.0, 4.0
+			"stair_test L0 up", Vector3(2.5, 0.9, 3.0), Vector3(1.0, 0.0, 0.0), 240, 0.0, 4.0
 		),
 		WalkCase.new(
 			"atrium L0 up east stair", Vector3(13.0, 0.9, 7.0), Vector3(0.0, 0.0, 1.0), 360, 0.0, 4.0
@@ -117,9 +117,11 @@ func _walk_case(c: WalkCase) -> bool:
 		await physics_frame
 
 	## Capsule center rests ~0.8 above the floor; allow slack for landing bounce.
+	## When the case starts already on a tread, min_y may be > expect_min_y.
 	var reached_top := max_y >= c.expect_max_y + 0.6
-	var reached_bottom := min_y <= c.expect_min_y + 1.0
-	var ok := reached_top and reached_bottom
+	var reached_bottom := min_y <= c.expect_min_y + 1.5
+	var climbed := max_y - min_y >= maxf(1.5, (c.expect_max_y - c.expect_min_y) * 0.5)
+	var ok := reached_top and (reached_bottom or climbed)
 	print(
 		"%s %s | final=%s max_y=%.2f min_y=%.2f (expected floor span %.1f..%.1f)"
 		% [

@@ -19,6 +19,10 @@ static func build(
 		spec.open_dirs = open_dirs.duplicate()
 	elif not open_dirs.is_empty():
 		spec.open_dirs = open_dirs.duplicate()
+	if opts.has("open_faces"):
+		spec.open_faces = (opts["open_faces"] as Array).duplicate()
+	if opts.has("doorway_cells"):
+		spec.doorway_cells = (opts["doorway_cells"] as Dictionary).duplicate()
 
 	if bool(opts.get("clear_player", false)):
 		_clear_kind(spec, RoomCells.Kind.PLAYER)
@@ -26,6 +30,10 @@ static func build(
 		_ensure_marker(spec, RoomCells.Kind.PLAYER)
 	if bool(opts.get("exit", false)):
 		_ensure_marker(spec, RoomCells.Kind.EXIT)
+
+	## Intentional overlap from hybrid carve pass (before validation).
+	const Carve := preload("res://scripts/procgen/carve_merger.gd")
+	Carve.apply_to_spec(spec, opts)
 
 	var want_player := bool(opts.get("player_spawn", false))
 	var want_exit := bool(opts.get("exit", false))
@@ -45,9 +53,18 @@ static func build(
 		_ensure_enemy_markers(spec, enemy_count)
 
 	RoomValidators.validate_or_assert(spec, want_player, want_exit)
+	## Close unused doorway gaps in the ASCII itself so map + walls agree.
+	if not bool(opts.get("skip_edge_seal", false)):
+		## Only host carve-opens need seal protection; emptied guest cells are void.
+		RoomBaker.seal_closed_edges(spec, opts.get("carve_open_ascii", []))
 	var room := RoomBaker.bake(spec)
 	room.spec = spec
 	room.add_to_group(ModuleContract.GROUP_MODULE)
+	if (
+		not (opts.get("carve_open_ascii", []) as Array).is_empty()
+		or not (opts.get("carve_empty_ascii", []) as Array).is_empty()
+	):
+		room.set_meta("carve_ok", true)
 
 	var dress := bool(opts.get("decor", true))
 	if dress:
@@ -168,6 +185,10 @@ static func _add_sparse_decor(room: RoomModule, spec: RoomSpec, module_id: Strin
 			_place_prop(room, KaykitPaths.CRATE, _prop_pos(spec, 0.85, 0.15), -0.3, true)
 		&"corridor":
 			_place_prop(room, KaykitPaths.BARREL, _prop_pos(spec, 0.5, 0.35), 0.1, true)
+		&"hall":
+			_place_prop(room, KaykitPaths.COLUMN, _prop_pos(spec, 0.2, 0.5), 0.0, true)
+			_place_prop(room, KaykitPaths.COLUMN, _prop_pos(spec, 0.8, 0.5), 0.0, true)
+			_place_prop(room, KaykitPaths.BANNER, _prop_pos(spec, 0.5, 0.0, 0.35), 0.0, false)
 		&"exit":
 			_place_prop(room, KaykitPaths.BANNER, _prop_pos(spec, 0.5, 1.0, 0.35), PI, false)
 			_place_prop(room, KaykitPaths.COLUMN, _prop_pos(spec, 0.2, 0.8), 0.0, true)

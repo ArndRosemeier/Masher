@@ -40,6 +40,126 @@ const KAYKIT_FLOOR_SIZE := 4.0
 const WALL_THICKNESS := 0.28
 
 
+static func seal_closed_edges(spec: RoomSpec, extra_protected: Array = []) -> void:
+	## Second pass before bake: turn exterior floor gaps that are not real doorways
+	## into `#` so the F1 map matches 3D enclosure (DoorSeal alone left `.` on the map).
+	var protected := _stair_landing_floors(spec)
+	for cell_variant in extra_protected:
+		var c: Vector3i = cell_variant
+		protected[c] = true
+	var dirs: Array[ModuleContract.Dir] = [
+		ModuleContract.Dir.N,
+		ModuleContract.Dir.E,
+		ModuleContract.Dir.S,
+		ModuleContract.Dir.W,
+	]
+	for dir in dirs:
+		for level in spec.layer_count():
+			var edge := _edge_floor_cells(spec, level, dir)
+			if edge.is_empty():
+				continue
+			var face_open := _face_open(spec, dir, level) and dir in spec.open_dirs
+			var keep: Dictionary = {} ## Vector2i -> true
+			if face_open:
+				for dcell in _doorways_for_face(spec, dir, level, edge):
+					keep[dcell] = true
+			for cell in edge:
+				if keep.has(cell):
+					continue
+				if protected.has(Vector3i(level, cell.x, cell.y)):
+					continue
+				spec.set_cell(level, cell.x, cell.y, RoomCells.Kind.WALL)
+
+
+static func _stair_landing_floors(spec: RoomSpec) -> Dictionary:
+	## Vector3i(level,x,z) → true. Keep stair approach + upper exit, then flood all
+	## connected floors on that layer so sealing an open-face non-doorway rim cell
+	## cannot cut the landing off from E/W doorways (stair_test shaft voids).
+	var seeds: Dictionary = {}
+	for run in StairDetector.detect(spec):
+		var top: Vector2i = run.top()
+		var bottom: Vector2i = run.bottom()
+		var step: Vector2i = (top - bottom).sign()
+		if run.ascending:
+			var entry: Vector2i = bottom - step
+			if spec.in_bounds(entry.x, entry.y):
+				seeds[Vector3i(run.level, entry.x, entry.y)] = true
+			if run.level + 1 < spec.layer_count():
+				var exit_cell: Vector2i = top + step
+				if spec.in_bounds(exit_cell.x, exit_cell.y):
+					seeds[Vector3i(run.level + 1, exit_cell.x, exit_cell.y)] = true
+		else:
+			var approach: Vector2i = top + step
+			if spec.in_bounds(approach.x, approach.y):
+				seeds[Vector3i(run.level, approach.x, approach.y)] = true
+	var out: Dictionary = {}
+	var stack: Array[Vector3i] = []
+	for key_variant in seeds.keys():
+		var seed: Vector3i = key_variant
+		if RoomCells.is_floor_surface(spec.get_cell(seed.x, seed.y, seed.z)):
+			stack.append(seed)
+	while not stack.is_empty():
+		var key: Vector3i = stack.pop_back()
+		if out.has(key):
+			continue
+		out[key] = true
+		for d_variant in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+			var d: Vector2i = d_variant
+			var nx: int = key.y + d.x
+			var nz: int = key.z + d.y
+			if not spec.in_bounds(nx, nz):
+				continue
+			if not RoomCells.is_floor_surface(spec.get_cell(key.x, nx, nz)):
+				continue
+			var nxt := Vector3i(key.x, nx, nz)
+			if not out.has(nxt):
+				stack.append(nxt)
+	return out
+
+
+static func _edge_floor_cells(spec: RoomSpec, level: int, dir: ModuleContract.Dir) -> Array[Vector2i]:
+	## Only plain floor — never seal over P/E/M/S/D/^ markers.
+	var cells: Array[Vector2i] = []
+	match dir:
+		ModuleContract.Dir.E:
+			for z in spec.depth:
+				if spec.get_cell(level, spec.width - 1, z) == RoomCells.Kind.FLOOR:
+					cells.append(Vector2i(spec.width - 1, z))
+		ModuleContract.Dir.W:
+			for z in spec.depth:
+				if spec.get_cell(level, 0, z) == RoomCells.Kind.FLOOR:
+					cells.append(Vector2i(0, z))
+		ModuleContract.Dir.S:
+			for x in spec.width:
+				if spec.get_cell(level, x, spec.depth - 1) == RoomCells.Kind.FLOOR:
+					cells.append(Vector2i(x, spec.depth - 1))
+		ModuleContract.Dir.N:
+			for x in spec.width:
+				if spec.get_cell(level, x, 0) == RoomCells.Kind.FLOOR:
+					cells.append(Vector2i(x, 0))
+	return cells
+
+
+static func _doorways_for_face(
+	spec: RoomSpec,
+	dir: ModuleContract.Dir,
+	level: int,
+	edge: Array[Vector2i]
+) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	var key := Vector2i(dir as int, level)
+	if spec.doorway_cells.has(key):
+		for cell_variant in spec.doorway_cells[key] as Array:
+			var cell: Vector2i = cell_variant
+			if RoomCells.is_walkable(spec.get_cell(level, cell.x, cell.y)):
+				out.append(cell)
+		if not out.is_empty():
+			return out
+	if not edge.is_empty():
+		out.append(_pick_doorway_cell(spec, edge))
+	return out
+
+
 static func _cell_needs_floor(kind: int) -> bool:
 	## Floors cover walkable cells and `#` wall cells so recessed outer shells enlarge the room.
 	return RoomCells.is_floor_surface(kind) or kind == RoomCells.Kind.WALL
@@ -249,26 +369,50 @@ const MIN_STEP_DEPTH := 0.28
 
 
 static func _add_doorframes(room: RoomModule, spec: RoomSpec) -> void:
-	## Open-edge floor cells would leave a full-cell void (cell_size × layer_height).
-	## Keep one door-sized hole in a thin outer shell; seal other edge gaps the same way.
-	## Multi-layer rooms may open on more than layer 0 — bake every open layer.
+	## Walkable edge cells punch a full-height hole unless we shell them.
+	## Open faces: one door gap + seals on the rest of that edge.
+	## Closed faces (including upper stair landings with no procgen link): seal ALL
+	## walkable edge cells so players can't stroll into the abyss.
 	var wall_mat := StandardMaterial3D.new()
 	wall_mat.albedo_color = Color(0.22, 0.2, 0.18)
 	wall_mat.roughness = 0.95
 
-	for dir in spec.open_dirs:
-		if ModuleContract.is_vertical(dir):
-			continue
+	var dirs: Array[ModuleContract.Dir] = [
+		ModuleContract.Dir.N,
+		ModuleContract.Dir.E,
+		ModuleContract.Dir.S,
+		ModuleContract.Dir.W,
+	]
+	for dir in dirs:
 		for level in spec.layer_count():
 			var edge := _edge_walkable_cells(spec, level, dir)
 			if edge.is_empty():
 				continue
-			var doorway := _pick_doorway_cell(spec, edge)
-			_bake_doorframe_cell(room, spec, level, doorway, dir, wall_mat)
-			for cell in edge:
-				if cell == doorway:
-					continue
-				_bake_edge_seal_wall(room, spec, level, cell, dir, wall_mat)
+			if _face_open(spec, dir, level) and dir in spec.open_dirs:
+				var doorways := _doorways_for_face(spec, dir, level, edge)
+				var door_set: Dictionary = {}
+				for doorway in doorways:
+					door_set[doorway] = true
+					_bake_doorframe_cell(room, spec, level, doorway, dir, wall_mat)
+				for cell in edge:
+					if door_set.has(cell):
+						continue
+					_bake_edge_seal_wall(room, spec, level, cell, dir, wall_mat)
+			else:
+				for cell in edge:
+					_bake_edge_seal_wall(room, spec, level, cell, dir, wall_mat)
+
+
+static func _face_open(spec: RoomSpec, dir: ModuleContract.Dir, level: int) -> bool:
+	## Procgen supplies open_faces so upper-storey ASCII gaps don't become doors into void.
+	if spec.open_faces.is_empty():
+		return true
+	var key := Vector2i(dir as int, level)
+	for face_variant in spec.open_faces:
+		var face: Vector2i = face_variant
+		if face == key:
+			return true
+	return false
 
 
 static func _edge_walkable_cells(spec: RoomSpec, level: int, dir: ModuleContract.Dir) -> Array[Vector2i]:
@@ -662,6 +806,8 @@ static func _add_doors(room: RoomModule, spec: RoomSpec) -> void:
 			continue
 		var any := false
 		for level in spec.layer_count():
+			if not _face_open(spec, dir, level):
+				continue
 			var door_cell := _find_doorway_cell(spec, level, dir)
 			if door_cell == Vector2i(-1, -1):
 				continue

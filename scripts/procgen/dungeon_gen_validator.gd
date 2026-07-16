@@ -2,6 +2,10 @@ class_name DungeonGenValidator
 extends RefCounted
 ## Structural checks for a built hybrid dungeon (modules already in the tree).
 ## Returns error strings; empty means OK. Loud on purpose — no soft skips.
+##
+## Perimeter rule: every walkable edge cell must be either a paired doorway or a
+## baked DoorSeal. RoomBaker.seal_closed_edges turns unused exterior floors into
+## `#` before bake so the F1 map matches 3D walls.
 
 
 static func validate(dungeon_root: Node3D) -> PackedStringArray:
@@ -23,6 +27,8 @@ static func validate(dungeon_root: Node3D) -> PackedStringArray:
 
 	errors.append_array(_validate_door_links(model))
 	errors.append_array(_validate_vertical_links(model))
+	errors.append_array(_validate_perimeter(rooms, model))
+	errors.append_array(_validate_exterior_egress(rooms, model))
 	errors.append_array(_validate_reachability(dungeon_root, model, rooms))
 	return errors
 
@@ -88,7 +94,7 @@ static func _validate_room_specs(rooms: Array[RoomModule]) -> PackedStringArray:
 
 static func _validate_no_overlap(rooms: Array[RoomModule]) -> PackedStringArray:
 	var errors: PackedStringArray = []
-	var occ: Dictionary = {} ## Vector3i(gx, level, gz) -> module_id
+	var occ: Dictionary = {} ## Vector3i(gx, level, gz) -> RoomModule
 	for room in rooms:
 		var fp := room.spec.footprint_cells()
 		for ly in room.spec.layer_count():
@@ -97,13 +103,21 @@ static func _validate_no_overlap(rooms: Array[RoomModule]) -> PackedStringArray:
 				for x in fp.x:
 					var key := Vector3i(room.grid_cell.x + x, lv, room.grid_cell.y + z)
 					if occ.has(key):
+						var other: RoomModule = occ[key] as RoomModule
+						if _carve_overlap_allowed(room, other):
+							continue
 						errors.append(
 							"overlap at grid %s between %s and %s"
-							% [str(key), occ[key], room.module_id]
+							% [str(key), other.module_id, room.module_id]
 						)
 					else:
-						occ[key] = room.module_id
+						occ[key] = room
 	return errors
+
+
+static func _carve_overlap_allowed(a: RoomModule, b: RoomModule) -> bool:
+	## Intentional CarveMerger unions may share footprint cells.
+	return a.has_meta("carve_ok") and b.has_meta("carve_ok")
 
 
 static func _validate_door_links(model: DungeonMapModel) -> PackedStringArray:
@@ -132,6 +146,267 @@ static func _validate_vertical_links(model: DungeonMapModel) -> PackedStringArra
 				"up-stair %s has no upper landing on floor %d" % [link.label, link.to_floor]
 			)
 	return errors
+
+
+static func _validate_perimeter(rooms: Array[RoomModule], model: DungeonMapModel) -> PackedStringArray:
+	## Contract with RoomBaker._add_doorframes: closed faces seal every walkable
+	## edge cell; open faces leave exactly one doorway (paired) and seal the rest.
+	var errors: PackedStringArray = []
+	var dirs: Array[ModuleContract.Dir] = [
+		ModuleContract.Dir.N,
+		ModuleContract.Dir.E,
+		ModuleContract.Dir.S,
+		ModuleContract.Dir.W,
+	]
+	for room in rooms:
+		var spec: RoomSpec = room.spec
+		var origin := _room_origin_cells(room)
+		for dir in dirs:
+			for level in spec.layer_count():
+				var edge := _edge_walkable_cells(spec, level, dir)
+				if edge.is_empty():
+					continue
+				var world_floor := room.vertical_level + level
+				var face_open := _face_open(spec, dir, level)
+				if face_open:
+					var doorways := _doorway_cells_for_face(spec, dir, level, edge)
+					for cell in edge:
+						var seal_name := _seal_node_name(dir, level, cell)
+						var has_seal := room.get_node_or_null(seal_name) != null
+						if doorways.has(cell):
+							if has_seal:
+								errors.append(
+									"%s L%d %s doorway %s is sealed (should be open)"
+									% [room.module_id, world_floor, ModuleContract.dir_name(dir), str(cell)]
+								)
+							var world_cell := Vector2i(origin.x + cell.x, origin.y + cell.y)
+							if not _has_paired_door(model, room.module_id, dir, world_floor, world_cell):
+								errors.append(
+									"%s L%d %s doorway %s has no paired peer (opens into abyss)"
+									% [room.module_id, world_floor, ModuleContract.dir_name(dir), str(cell)]
+								)
+						elif not has_seal:
+							errors.append(
+								"%s L%d %s edge cell %s missing DoorSeal (non-doorway on open face)"
+								% [room.module_id, world_floor, ModuleContract.dir_name(dir), str(cell)]
+							)
+				else:
+					for cell in edge:
+						var seal_name2 := _seal_node_name(dir, level, cell)
+						if room.get_node_or_null(seal_name2) == null:
+							errors.append(
+								"%s L%d %s edge cell %s missing DoorSeal (closed face opens into abyss)"
+								% [room.module_id, world_floor, ModuleContract.dir_name(dir), str(cell)]
+							)
+	return errors
+
+
+static func _validate_exterior_egress(
+	rooms: Array[RoomModule],
+	model: DungeonMapModel
+) -> PackedStringArray:
+	## Map-level: any walkable cell whose cardinal neighbor is void must be a
+	## paired doorway or have a DoorSeal. Module ids are not unique (many
+	## stair_test copies), so ownership is resolved by footprint containment.
+	var errors: PackedStringArray = []
+	var dirs: Array[ModuleContract.Dir] = [
+		ModuleContract.Dir.N,
+		ModuleContract.Dir.E,
+		ModuleContract.Dir.S,
+		ModuleContract.Dir.W,
+	]
+	var dir_delta: Dictionary = {
+		ModuleContract.Dir.N: Vector2i(0, -1),
+		ModuleContract.Dir.E: Vector2i(1, 0),
+		ModuleContract.Dir.S: Vector2i(0, 1),
+		ModuleContract.Dir.W: Vector2i(-1, 0),
+	}
+
+	for floor_index in model.floor_list:
+		var layer: DungeonMapModel.FloorLayer = model.floors.get(floor_index) as DungeonMapModel.FloorLayer
+		if layer == null:
+			continue
+		for key_variant in layer.cells.keys():
+			var cell: Vector2i = key_variant
+			if not _is_traversable(model, floor_index, cell):
+				continue
+			for dir in dirs:
+				var delta: Vector2i = dir_delta[dir]
+				var neighbor: Vector2i = cell + delta
+				## Authored voids inside a footprint are stamped as ' '; only a
+				## missing map cell is true exterior abyss.
+				if _map_has_cell(model, floor_index, neighbor):
+					continue
+				if _has_paired_door_at(model, dir, floor_index, cell):
+					continue
+				var room := _room_containing_cell(rooms, floor_index, cell)
+				if room == null:
+					errors.append(
+						"F%d cell %s faces void %s with no containing module"
+						% [floor_index, str(cell), ModuleContract.dir_name(dir)]
+					)
+					continue
+				var origin := _room_origin_cells(room)
+				var local := Vector2i(cell.x - origin.x, cell.y - origin.y)
+				var local_level := floor_index - room.vertical_level
+				var seal_name := _seal_node_name(dir, local_level, local)
+				if room.get_node_or_null(seal_name) == null:
+					errors.append(
+						"F%d cell %s (%s @%s) faces abyss to the %s — no paired door and no DoorSeal"
+						% [
+							floor_index,
+							str(cell),
+							room.module_id,
+							str(room.grid_cell),
+							ModuleContract.dir_name(dir),
+						]
+					)
+	return errors
+
+
+static func _room_containing_cell(
+	rooms: Array[RoomModule],
+	floor_index: int,
+	cell: Vector2i
+) -> RoomModule:
+	for room in rooms:
+		var spec: RoomSpec = room.spec
+		if spec == null:
+			continue
+		var local_level := floor_index - room.vertical_level
+		if local_level < 0 or local_level >= spec.layer_count():
+			continue
+		var origin := _room_origin_cells(room)
+		var local := Vector2i(cell.x - origin.x, cell.y - origin.y)
+		if not spec.in_bounds(local.x, local.y):
+			continue
+		if RoomCells.is_walkable(spec.get_cell(local_level, local.x, local.y)):
+			return room
+	return null
+
+
+static func _map_has_cell(model: DungeonMapModel, floor_index: int, cell: Vector2i) -> bool:
+	var layer: DungeonMapModel.FloorLayer = model.floors.get(floor_index) as DungeonMapModel.FloorLayer
+	return layer != null and layer.has_cell(cell)
+
+
+static func _face_open(spec: RoomSpec, dir: ModuleContract.Dir, level: int) -> bool:
+	## Must match RoomBaker._face_open + open_dirs gate.
+	if dir not in spec.open_dirs:
+		return false
+	if spec.open_faces.is_empty():
+		return true
+	var key := Vector2i(dir as int, level)
+	for face_variant in spec.open_faces:
+		if (face_variant as Vector2i) == key:
+			return true
+	return false
+
+
+static func _edge_walkable_cells(spec: RoomSpec, level: int, dir: ModuleContract.Dir) -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	match dir:
+		ModuleContract.Dir.E:
+			for z in spec.depth:
+				if RoomCells.is_walkable(spec.get_cell(level, spec.width - 1, z)):
+					cells.append(Vector2i(spec.width - 1, z))
+		ModuleContract.Dir.W:
+			for z in spec.depth:
+				if RoomCells.is_walkable(spec.get_cell(level, 0, z)):
+					cells.append(Vector2i(0, z))
+		ModuleContract.Dir.S:
+			for x in spec.width:
+				if RoomCells.is_walkable(spec.get_cell(level, x, spec.depth - 1)):
+					cells.append(Vector2i(x, spec.depth - 1))
+		ModuleContract.Dir.N:
+			for x in spec.width:
+				if RoomCells.is_walkable(spec.get_cell(level, x, 0)):
+					cells.append(Vector2i(x, 0))
+	return cells
+
+
+static func _pick_doorway_cell(spec: RoomSpec, candidates: Array[Vector2i]) -> Vector2i:
+	assert(not candidates.is_empty(), "DungeonGenValidator: doorway pick requires candidates")
+	var mid := Vector2(float(spec.width) * 0.5, float(spec.depth) * 0.5)
+	var best := candidates[0]
+	var best_d := INF
+	for c in candidates:
+		var d := Vector2(float(c.x) + 0.5, float(c.y) + 0.5).distance_squared_to(mid)
+		if d < best_d:
+			best_d = d
+			best = c
+	return best
+
+
+static func _doorway_cells_for_face(
+	spec: RoomSpec,
+	dir: ModuleContract.Dir,
+	level: int,
+	edge: Array[Vector2i]
+) -> Dictionary:
+	var out: Dictionary = {}
+	var key := Vector2i(dir as int, level)
+	if spec.doorway_cells.has(key):
+		for cell_variant in spec.doorway_cells[key] as Array:
+			out[cell_variant as Vector2i] = true
+		if not out.is_empty():
+			return out
+	if not edge.is_empty():
+		out[_pick_doorway_cell(spec, edge)] = true
+	return out
+
+
+static func _seal_node_name(dir: ModuleContract.Dir, level: int, cell: Vector2i) -> String:
+	return "DoorSeal_%s_L%d_%d_%d" % [ModuleContract.dir_name(dir), level, cell.x, cell.y]
+
+
+static func _room_origin_cells(room: RoomModule) -> Vector2i:
+	var cs := room.spec.cell_size
+	return Vector2i(
+		int(round(room.position.x / cs)),
+		int(round(room.position.z / cs))
+	)
+
+
+static func _has_paired_door(
+	model: DungeonMapModel,
+	module_id: StringName,
+	dir: ModuleContract.Dir,
+	floor_index: int,
+	world_cell: Vector2i
+) -> bool:
+	var id := String(module_id)
+	for door in model.door_links:
+		if not door.paired:
+			continue
+		if door.floor_index != floor_index:
+			continue
+		if door.dir != dir:
+			continue
+		if door.module_id != id:
+			continue
+		if door.world_cell != world_cell:
+			continue
+		return true
+	return false
+
+
+static func _has_paired_door_at(
+	model: DungeonMapModel,
+	dir: ModuleContract.Dir,
+	floor_index: int,
+	world_cell: Vector2i
+) -> bool:
+	for door in model.door_links:
+		if not door.paired:
+			continue
+		if door.floor_index != floor_index:
+			continue
+		if door.dir != dir:
+			continue
+		if door.world_cell == world_cell:
+			return true
+	return false
 
 
 static func _validate_reachability(

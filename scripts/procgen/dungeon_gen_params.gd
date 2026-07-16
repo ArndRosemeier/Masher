@@ -43,13 +43,40 @@ func max_level() -> int:
 
 
 func path_length_target() -> int:
-	## Scales with harness volume; includes start + exit.
-	var n := grid_w() + grid_d() + floor_count()
-	return clampi(n, 4, 48)
+	## Back-compat alias: spine module count from harness *area* (not w+d sausage).
+	return path_module_target()
+
+
+func path_module_target() -> int:
+	## Fill a chunk of the ground-plane grid so large presets spread in 2D.
+	var area := grid_w() * grid_d()
+	return clampi(int(round(float(area) * 0.42)), 5, 56)
 
 
 func side_room_target() -> int:
-	return clampi(floor_count() / 2, 0, 8)
+	## Branches / pockets — scales with area, not just floor count.
+	var area := grid_w() * grid_d()
+	return clampi(int(round(float(area) * 0.14)), 2, 20)
+
+
+func loop_attempt_target() -> int:
+	return clampi(path_module_target() / 3, 1, 12)
+
+
+func upper_cluster_target() -> int:
+	## Rooms to grow on a stair's upper floor (beyond the landing itself).
+	return clampi(2 + floor_count(), 2, 6)
+
+
+func max_stair_rises() -> int:
+	## How many times the path may climb (0→1→2…). Capped by harness floors.
+	return clampi(floor_count() - 1, 1, 3)
+
+
+func carve_bite_target() -> int:
+	## Intentional partial overlaps for irregular room unions.
+	var area := grid_w() * grid_d()
+	return clampi(int(round(float(area) * 0.06)), 1, 8)
 
 
 func summary_text() -> String:

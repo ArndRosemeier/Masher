@@ -152,25 +152,38 @@ static func build(module_nodes: Array) -> DungeonMapModel:
 			if ModuleContract.is_vertical(dir):
 				continue
 			for local_level in spec.layer_count():
-				var door_local := _find_doorway_cell(spec, local_level, dir)
-				if door_local == Vector2i(-1, -1):
-					continue
-				var door := DoorLink.new()
-				door.dir = dir
-				door.floor_index = room.vertical_level + local_level
-				door.module_id = ref.module_id
-				door.world_cell = Vector2i(origin.x + door_local.x, origin.y + door_local.y)
-				door.label = "%s  door %s L%d" % [
-					ref.module_id, ModuleContract.dir_name(dir), door.floor_index
-				]
-				model.door_links.append(door)
-				## Map-only glyph: doorways are walkable edge cells in room ASCII; show as `+`.
-				var door_layer: FloorLayer = model.floors.get(door.floor_index) as FloorLayer
-				if door_layer != null:
-					_stamp(door_layer, door.world_cell, "+", ref.module_id)
+				if not spec.open_faces.is_empty():
+					var wanted := Vector2i(dir as int, local_level)
+					var allowed := false
+					for face_variant in spec.open_faces:
+						if (face_variant as Vector2i) == wanted:
+							allowed = true
+							break
+					if not allowed:
+						continue
+				var door_locals := _find_doorway_cells(spec, local_level, dir)
+				for door_local in door_locals:
+					var door := DoorLink.new()
+					door.dir = dir
+					door.floor_index = room.vertical_level + local_level
+					door.module_id = ref.module_id
+					door.world_cell = Vector2i(origin.x + door_local.x, origin.y + door_local.y)
+					door.label = "%s  door %s L%d" % [
+						ref.module_id, ModuleContract.dir_name(dir), door.floor_index
+					]
+					model.door_links.append(door)
 
 	_pair_vertical_links(model)
 	_pair_door_links(model)
+	## One `+` per connection (E/S side only) — avoids `++` from both doorfaces.
+	for door in model.door_links:
+		if not door.paired:
+			continue
+		if door.dir != ModuleContract.Dir.E and door.dir != ModuleContract.Dir.S:
+			continue
+		var door_layer: FloorLayer = model.floors.get(door.floor_index) as FloorLayer
+		if door_layer != null:
+			_stamp(door_layer, door.world_cell, "+", door.module_id)
 
 	model.floor_list.clear()
 	for k in model.floors.keys():
@@ -187,9 +200,12 @@ static func player_world_cell(player: Node3D, cell_size: float = 2.0) -> Vector2
 
 
 static func player_world_floor(player: Node3D, level_height: float = 4.0) -> int:
+	## Works for the player capsule (~+0.8) and spawn/exit markers (~+0.15).
+	## A small positive bias stops move_and_slide sink (y ≈ -0.05) from reporting
+	## the floor below.
 	if player == null:
 		return -99999
-	return int(floor((player.global_position.y + 0.05) / level_height))
+	return int(floor((player.global_position.y + 0.5) / level_height))
 
 
 static func _world_origin_cells(room: RoomModule) -> Vector2i:
@@ -348,22 +364,30 @@ static func _door_pair_distance(a: DoorLink, b: DoorLink) -> float:
 
 
 static func _doors_face_across_gap(a: DoorLink, b: DoorLink) -> bool:
-	## True when the two doorway cells sit on opposite faces of the same gap
-	## (one cell apart on the normal, overlapping on the tangent within a room).
-	const TANGENT_SLACK := 4 ## ASCII cells; covers 1×1 vs 2×2 midpoint mismatch
+	## True when doorway cells face across the same gap on the same row/column.
+	## Tangent must match exactly — slack caused "door into wall" (hole vs `#`).
 	match a.dir:
 		ModuleContract.Dir.E:
-			return b.world_cell.x == a.world_cell.x + 1 and absi(a.world_cell.y - b.world_cell.y) <= TANGENT_SLACK
+			return b.world_cell.x == a.world_cell.x + 1 and a.world_cell.y == b.world_cell.y
 		ModuleContract.Dir.W:
-			return b.world_cell.x == a.world_cell.x - 1 and absi(a.world_cell.y - b.world_cell.y) <= TANGENT_SLACK
+			return b.world_cell.x == a.world_cell.x - 1 and a.world_cell.y == b.world_cell.y
 		ModuleContract.Dir.S:
-			return b.world_cell.y == a.world_cell.y + 1 and absi(a.world_cell.x - b.world_cell.x) <= TANGENT_SLACK
+			return b.world_cell.y == a.world_cell.y + 1 and a.world_cell.x == b.world_cell.x
 		ModuleContract.Dir.N:
-			return b.world_cell.y == a.world_cell.y - 1 and absi(a.world_cell.x - b.world_cell.x) <= TANGENT_SLACK
+			return b.world_cell.y == a.world_cell.y - 1 and a.world_cell.x == b.world_cell.x
 	return false
 
 
-static func _find_doorway_cell(spec: RoomSpec, level: int, dir: ModuleContract.Dir) -> Vector2i:
+static func _find_doorway_cells(spec: RoomSpec, level: int, dir: ModuleContract.Dir) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	var key := Vector2i(dir as int, level)
+	if spec.doorway_cells.has(key):
+		for cell_variant in spec.doorway_cells[key] as Array:
+			var cell: Vector2i = cell_variant
+			if RoomCells.is_walkable(spec.get_cell(level, cell.x, cell.y)):
+				out.append(cell)
+		if not out.is_empty():
+			return out
 	var candidates: Array[Vector2i] = []
 	match dir:
 		ModuleContract.Dir.E:
@@ -383,7 +407,7 @@ static func _find_doorway_cell(spec: RoomSpec, level: int, dir: ModuleContract.D
 				if RoomCells.is_walkable(spec.get_cell(level, x, 0)):
 					candidates.append(Vector2i(x, 0))
 	if candidates.is_empty():
-		return Vector2i(-1, -1)
+		return out
 	var mid := Vector2(float(spec.width) * 0.5, float(spec.depth) * 0.5)
 	var best := candidates[0]
 	var best_d := INF
@@ -392,4 +416,5 @@ static func _find_doorway_cell(spec: RoomSpec, level: int, dir: ModuleContract.D
 		if d < best_d:
 			best_d = d
 			best = c
-	return best
+	out.append(best)
+	return out

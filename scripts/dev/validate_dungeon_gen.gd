@@ -1,18 +1,12 @@
 extends SceneTree
-## Headless: generate hybrid dungeons across presets/seeds and run DungeonGenValidator.
+## Headless CI suite: fixed seed grid + Fixed POC + seal regression.
+## Broader random simulation: `simulate_dungeon_gen.gd` / `DungeonGenSim`.
 ##
 ## Usage:
 ##   godot --headless --path . -s res://scripts/dev/validate_dungeon_gen.gd
 
 const Validator := preload("res://scripts/procgen/dungeon_gen_validator.gd")
-const MapModel := preload("res://scripts/ui/dungeon_map_model.gd")
-
-const SEEDS: Array[int] = [1, 2, 7, 42, 99, 123, 555, 2026]
-const PRESETS: Array = [
-	DungeonGenParams.Preset.TINY,
-	DungeonGenParams.Preset.SMALL,
-	DungeonGenParams.Preset.MEDIUM,
-]
+const Sim := preload("res://scripts/procgen/dungeon_gen_sim.gd")
 
 
 func _initialize() -> void:
@@ -23,55 +17,25 @@ func _run() -> void:
 	var failed := 0
 	var checked := 0
 
-	for preset_variant in PRESETS:
-		var preset: DungeonGenParams.Preset = preset_variant as DungeonGenParams.Preset
-		for seed_value in SEEDS:
-			checked += 1
-			var label := "%s seed=%d" % [DungeonGenParams.preset_name(preset), seed_value]
-			var params := DungeonGenParams.from_preset(preset)
-			params.seed_value = seed_value
-			var gen := HybridDungeonGenerator.new(params)
-			var dungeon := gen.build_dungeon()
-			root.add_child(dungeon)
-			await process_frame
-			await process_frame
+	var config := Sim.Config.new()
+	config.presets = Sim.default_presets()
+	config.seeds = Sim.default_grid_seeds()
+	config.include_fixed_poc = true
+	config.verbose = true
+	var sim := Sim.new()
+	var batch = await sim.run_batch(root, config)
+	checked += batch.trials.size()
+	failed += batch.failed_count()
+	if batch.failed_count() > 0:
+		Sim.print_batch_summary(batch)
 
-			var errors: PackedStringArray = Validator.validate(dungeon)
-			if errors.is_empty():
-				print(
-					"OK  ",
-					label,
-					" modules=",
-					_module_count(dungeon),
-					" floors=",
-					MapModel.build(_rooms(dungeon)).floor_list,
-					" resolved_seed=",
-					gen.resolved_seed()
-				)
-			else:
-				failed += 1
-				push_error("FAIL %s (%d errors)" % [label, errors.size()])
-				for e in errors:
-					push_error("  · %s" % e)
-				print("FAIL ", label, " errors=", errors.size())
-
-			dungeon.free()
-			await process_frame
-
-	## Also validate the fixed POC once — same structural rules.
+	## Regression: unsealed walkable edges (upper-floor abyss) must fail loudly.
 	checked += 1
-	var fixed := FixedLevelSource.new().build_dungeon()
-	root.add_child(fixed)
-	await process_frame
-	var fixed_errors: PackedStringArray = Validator.validate(fixed)
-	if fixed_errors.is_empty():
-		print("OK  FixedPOC")
+	if _regression_unsealed_edge_is_caught():
+		print("OK  RegressionUnsealedEdge")
 	else:
 		failed += 1
-		for e in fixed_errors:
-			push_error("  · %s" % e)
-		print("FAIL FixedPOC errors=", fixed_errors.size())
-	fixed.free()
+		print("FAIL RegressionUnsealedEdge")
 
 	if failed > 0:
 		print("DUNGEON_GEN_FAIL ", failed, "/", checked)
@@ -81,20 +45,44 @@ func _run() -> void:
 		quit(0)
 
 
-func _module_count(dungeon: Node3D) -> int:
-	var n := 0
-	for room in _rooms(dungeon):
-		n += 1
-	return n
-
-
-func _rooms(dungeon: Node3D) -> Array:
-	var out: Array = []
-	var stack: Array = [dungeon]
-	while not stack.is_empty():
-		var n = stack.pop_back()
-		if n is RoomModule and (n as RoomModule).spec != null:
-			out.append(n)
-		for c in n.get_children():
-			stack.append(c)
-	return out
+func _regression_unsealed_edge_is_caught() -> bool:
+	## Skip ASCII seal, bake with DoorSeals, then strip L1 seals — validator must fail.
+	var opens: Array[ModuleContract.Dir] = [ModuleContract.Dir.W, ModuleContract.Dir.E]
+	var open_faces: Array = [Vector2i(ModuleContract.Dir.W as int, 0), Vector2i(ModuleContract.Dir.E as int, 0)]
+	var room := RoomFactory.build(
+		&"stair_test",
+		opens,
+		{
+			"force_open_dirs": true,
+			"open_faces": open_faces,
+			"decor": false,
+			"clear_player": true,
+			"skip_edge_seal": true,
+		}
+	)
+	var reg_root := Node3D.new()
+	reg_root.name = "RegressionRoot"
+	root.add_child(reg_root)
+	reg_root.add_child(room)
+	var to_strip: Array[Node] = []
+	for child in room.get_children():
+		var n := String(child.name)
+		if n.begins_with("DoorSeal_E_L1") or n.begins_with("DoorSeal_W_L1"):
+			to_strip.append(child)
+	for node in to_strip:
+		node.free()
+	var removed := to_strip.size()
+	if removed == 0:
+		push_error("RegressionUnsealedEdge: expected L1 DoorSeal nodes to strip")
+		reg_root.free()
+		return false
+	var errors: PackedStringArray = Validator.validate(reg_root)
+	reg_root.free()
+	var abyss := 0
+	for e in errors:
+		if e.contains("DoorSeal") or e.contains("abyss"):
+			abyss += 1
+	if abyss == 0:
+		push_error("RegressionUnsealedEdge: validator missed unsealed L1 edges; errors=%s" % str(errors))
+		return false
+	return true

@@ -1,11 +1,10 @@
 # id: combat
 # cell: 2.0
 # layer_height: 4.0
-# open: W,E
+# open: N,E,S,W
 
 layer 0
-####
-.MM.
 #..#
-####
-
+.MM.
+....
+#..#

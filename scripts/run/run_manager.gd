@@ -107,6 +107,7 @@ func begin_run(params: DungeonGenParams, use_fixed_poc: bool) -> void:
 		_dungeon = source.build_dungeon()
 		GameState.store_params(null, 0)
 		world_root.add_child(_dungeon)
+		DungeonGenValidator.validate_or_assert(_dungeon, "FixedPOC")
 		_finish_spawn(true)
 		return
 
@@ -115,6 +116,7 @@ func begin_run(params: DungeonGenParams, use_fixed_poc: bool) -> void:
 	_dungeon = gen.build_dungeon()
 	GameState.store_params(params, gen.resolved_seed())
 	world_root.add_child(_dungeon)
+	DungeonGenValidator.validate_or_assert(_dungeon, "HybridGen")
 	_finish_spawn(false)
 
 

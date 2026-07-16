@@ -6,6 +6,12 @@ var id: StringName = &"room"
 var cell_size: float = 2.0
 var layer_height: float = 4.0
 var open_dirs: Array[ModuleContract.Dir] = []
+## Optional precise faces from procgen: Vector2i(dir, local_level).
+## Empty means "every layer that has an ASCII gap for each open_dir" (hand-authored rooms).
+var open_faces: Array = []
+## Optional procgen door cells: Vector2i(dir, local_level) -> Array[Vector2i].
+## When set, seal/bake/map keep all of them (wide modules can face several peers).
+var doorway_cells: Dictionary = {}
 ## layers[level][z][x] -> RoomCells.Kind  (row z is north→south as written)
 var layers: Array = []
 var width: int = 0

@@ -1,11 +1,10 @@
 # id: exit
 # cell: 2.0
 # layer_height: 4.0
-# open: W
+# open: N,E,S,W
 
 layer 0
-####
-..E.
 #..#
-####
-
+..E.
+....
+#..#
